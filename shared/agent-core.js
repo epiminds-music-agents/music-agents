@@ -31,6 +31,20 @@ export function createAgent({ name, color, description, personality, systemPromp
   let moveQueue = [];
   let planningInProgress = false;
   let beatCounter = 0;
+  let cyclesUntilReset = 16 + Math.floor(Math.random() * 17); // 16–32
+  let cycleCount = 0;
+  let fullResetNext = false;
+  const CYCLE_MOODS = [
+    'Focus on one row only this round.',
+    'Spread notes across all your rows.',
+    'Favor the first half of the bar (steps 0–7).',
+    'Favor the second half (steps 8–15).',
+    'Dense burst then space.',
+    'Minimal: 2–3 notes max.',
+    'Emphasize offbeats only.',
+    'Emphasize downbeats only.',
+  ];
+  let currentMood = CYCLE_MOODS[Math.floor(Math.random() * CYCLE_MOODS.length)];
 
   const NOTE_NAMES = ['C5', 'A4', 'F4', 'D4', 'A3', 'D3'];
   const ROW_LABELS = ['HI', 'MH', 'MD', 'ML', 'LO', 'SUB'];
@@ -92,10 +106,14 @@ export function createAgent({ name, color, description, personality, systemPromp
     if (planningInProgress) return;
     planningInProgress = true;
 
-    const prompt = `Grid (* = your rows): ${gridSummary()}
-BPM:${bpm} Your rows:${scope.start}-${scope.end} Others:${otherAgents.filter(a => a.agentId !== agentId).map(a => a.name).join(',') || 'none'}
+    const resetHint = fullResetNext
+      ? 'FULL RESET: Ignore current grid. Generate a completely NEW pattern—brand new notes, different from before. Be bold and varied. '
+      : '';
+    const prompt = `${resetHint}Grid (* = your rows): ${gridSummary()}
+BPM:${bpm} Rows:${scope.start}-${scope.end} Others:${otherAgents.filter(a => a.agentId !== agentId).map(a => a.name).join(',') || 'none'}
+This cycle: ${currentMood}
 
-Give 8 moves. JSON array only: [{"row":N,"step":N},...] rows ${scope.start}-${scope.end}, steps 0-15.`;
+Reply with 8 moves only. JSON array: [{"row":N,"step":N},...] rows ${scope.start}-${scope.end}, steps 0-15. No explanation.`;
 
     const result = await askAI(prompt, 150);
     planningInProgress = false;
@@ -112,6 +130,7 @@ Give 8 moves. JSON array only: [{"row":N,"step":N},...] rows ${scope.start}-${sc
         );
         if (valid.length > 0) {
           moveQueue = valid;
+          if (fullResetNext) fullResetNext = false;
           console.log(`[${name}] Planned ${valid.length} moves`);
         }
       }
@@ -122,9 +141,17 @@ Give 8 moves. JSON array only: [{"row":N,"step":N},...] rows ${scope.start}-${sc
 
   // ── Chat ──────────────────────────────────────────────────────────────
 
+  const CHAT_PROMPTS = [
+    'React to the music in your voice—vary your tone: cryptic, hype, quiet, or absurd. One short line, max 10 words.',
+    'Say one thing in character. Surprise us: be intense, dreamy, sarcastic, or minimal. No quotes.',
+    'Drop a single line that fits the vibe. Change it up—whisper, shout, joke, or poet. Max 12 words.',
+    'Comment on the jam. Vary: mysterious, explosive, smooth, or dry. One sentence only.',
+  ];
+
   async function chat(context) {
-    const prompt = `${context}\nChat:${recentChat()}\nOne short sentence, max 12 words. No quotes.`;
-    return await askAI(prompt, 40);
+    const variation = CHAT_PROMPTS[Math.floor(Math.random() * CHAT_PROMPTS.length)];
+    const prompt = `${context}\nRecent chat: ${recentChat()}\n${variation}`;
+    return await askAI(prompt, 50);
   }
 
   // ── Play loop ─────────────────────────────────────────────────────────
@@ -160,20 +187,41 @@ Give 8 moves. JSON array only: [{"row":N,"step":N},...] rows ${scope.start}-${sc
         console.log(`[${name}] > r=${move.row} s=${move.step} (${moveQueue.length} left)`);
       }
 
-      // Refill when low
+      // Full reset every 16–32 cycles: new pattern from scratch
+      cycleCount++;
+      if (cycleCount >= cyclesUntilReset) {
+        moveQueue = [];
+        fullResetNext = true;
+        cycleCount = 0;
+        cyclesUntilReset = 16 + Math.floor(Math.random() * 17);
+        currentMood = CYCLE_MOODS[Math.floor(Math.random() * CYCLE_MOODS.length)];
+        console.log(`[${name}] Full reset in ${cyclesUntilReset} cycles, mood: ${currentMood}`);
+        if (!planningInProgress) planMoves();
+      }
+
+      // Refill when low (planMoves uses fullResetNext in prompt when set)
       if (moveQueue.length <= 2 && !planningInProgress) {
         planMoves();
       }
 
-      // Chat occasionally
+      // Chat occasionally — varied prompts to push different tones
       beatCounter++;
       if (Math.random() < 0.08) {
-        chat('Comment on the music briefly.').then(msg => {
+        const contexts = [
+          'The jam is happening. React in character—vary: cryptic, hype, calm, or absurd.',
+          'Something just shifted in the grid. One line. Surprise us.',
+          'Drop a single in-character line. Change your energy from last time.',
+        ];
+        chat(contexts[Math.floor(Math.random() * contexts.length)]).then(msg => {
           if (msg) sendChat(msg);
         });
       }
       if (beatCounter % 120 === 0) {
-        chat('Share a thought about the vibe.').then(msg => {
+        const longContexts = [
+          'You\'ve been playing a while. Share a thought—could be deep, silly, minimal, or intense. Vary your personality.',
+          'Check in on the vibe. One line. Don\'t repeat a tone you used before.',
+        ];
+        chat(longContexts[Math.floor(Math.random() * longContexts.length)]).then(msg => {
           if (msg) sendChat(msg);
         });
       }
@@ -243,7 +291,7 @@ Give 8 moves. JSON array only: [{"row":N,"step":N},...] rows ${scope.start}-${sc
             isPlaying = msg.isPlaying;
             if (isPlaying) {
               startPlayLoop();
-              chat('Playback started! React.').then(msg => {
+              chat('Playback just started. React in character—be hype, dry, mysterious, or absurd. One line.').then(msg => {
                 if (msg) sendChat(msg);
               });
             } else {
@@ -264,7 +312,7 @@ Give 8 moves. JSON array only: [{"row":N,"step":N},...] rows ${scope.start}-${sc
               if (oldStart !== scope.start || oldEnd !== scope.end) {
                 console.log(`[${name}] Scope changed: rows ${scope.start}-${scope.end}`);
                 moveQueue = [];
-                chat(`My rows changed to ${scope.start}-${scope.end}. React.`).then(msg => {
+                chat(`Your rows changed to ${scope.start}-${scope.end}. React in character—surprised, cool, sarcastic, or minimal. Vary your tone.`).then(msg => {
                   if (msg) sendChat(msg);
                 });
               }
@@ -288,9 +336,11 @@ Give 8 moves. JSON array only: [{"row":N,"step":N},...] rows ${scope.start}-${sc
               if (chatHistory.length > 50) chatHistory.shift();
               if (msg.message.agentId !== agentId && Math.random() < 0.35) {
                 setTimeout(async () => {
-                  const reply = await chat(
-                    `${msg.message.name} said: "${msg.message.text}". React.`
-                  );
+                  const prompts = [
+                    `${msg.message.name} said: "${msg.message.text}". React—agree, clash, joke, or stay cryptic. Vary your tone.`,
+                    `Someone said: "${msg.message.text}". Reply in character. Surprise them; don't match their energy.`,
+                  ];
+                  const reply = await chat(prompts[Math.floor(Math.random() * prompts.length)]);
                   if (reply) sendChat(reply);
                 }, 1000 + Math.random() * 1500);
               }
