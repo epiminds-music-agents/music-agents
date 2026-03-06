@@ -296,16 +296,16 @@ Write ONE short in-character message (1 sentence, max 15 words). No quotes, no J
         planNextPhrase();
       }
 
-      // Occasionally chat (~every 6-7 beats)
-      if (Math.random() < 0.15) {
+      // Occasionally chat (~every 12 beats)
+      if (Math.random() < 0.08) {
         decideChatMessage('Comment briefly on the music or react to what others are playing.').then(msg => {
           if (msg) sendChat(msg);
         });
       }
 
-      // Periodic vibe check every 60 beats
+      // Periodic vibe check every 120 beats
       beatCounter++;
-      if (beatCounter % 60 === 0) {
+      if (beatCounter % 120 === 0) {
         decideChatMessage('Share a brief thought about the current musical vibe.').then(msg => {
           if (msg) sendChat(msg);
         });
@@ -425,7 +425,7 @@ Write ONE short in-character message (1 sentence, max 15 words). No quotes, no J
               chatHistory.push(msg.message);
               if (chatHistory.length > 50) chatHistory.shift();
               // 25% chance to respond to others, non-blocking
-              if (msg.message.agentId !== agentId && Math.random() < 0.60) {
+              if (msg.message.agentId !== agentId && Math.random() < 0.35) {
                 setTimeout(async () => {
                   const reply = await decideChatMessage(
                     `${msg.message.name} said: "${msg.message.text}". React if relevant.`
