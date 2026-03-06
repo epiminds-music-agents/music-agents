@@ -368,10 +368,8 @@ Write ONE short in-character message (1 sentence, max 15 words). No quotes, no J
             bpm = msg.bpm;
             isPlaying = msg.isPlaying;
             console.log(`[${name}] Scope: rows ${scope.start}-${scope.end}`);
-            // Introduce — non-blocking
-            decideChatMessage(
-              `You just joined. Your rows: ${scope.start}-${scope.end} (${ROW_LABELS.slice(scope.start, scope.end + 1).join(', ')} = ${NOTE_NAMES.slice(scope.start, scope.end + 1).join(', ')}). Introduce yourself.`
-            ).then(msg => { if (msg) sendChat(msg); });
+            // Instant greeting — no Gemini call
+            sendChat(`Hello I am agent ${name}`);
             if (isPlaying) startPlayLoop();
             break;
           }
