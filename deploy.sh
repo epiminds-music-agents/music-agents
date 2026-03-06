@@ -42,7 +42,7 @@ for agent in "${AGENTS[@]}"; do
     --service-account="${SA}" \
     --memory=256Mi \
     --timeout=3600 \
-    --min-instances=0 \
+    --min-instances=1 \
     --max-instances=1 \
     --project="${PROJECT}"
 

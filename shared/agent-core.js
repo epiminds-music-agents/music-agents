@@ -36,6 +36,7 @@ export function createAgent({ name, color, description, personality, systemPromp
   // Plan-ahead queue: pre-computed moves executed one per beat (zero latency)
   let moveQueue = [];
   let planningInProgress = false;
+  let beatCounter = 0;
 
   const NOTE_NAMES = ['C5', 'A4', 'F4', 'D4', 'A3', 'D3'];
   const ROW_LABELS = ['HI', 'MH', 'MD', 'ML', 'LO', 'SUB'];
@@ -295,9 +296,17 @@ Write ONE short in-character message (1 sentence, max 15 words). No quotes, no J
         planNextPhrase();
       }
 
-      // Occasionally chat (~every 16 beats)
-      if (Math.random() < 0.06) {
+      // Occasionally chat (~every 6-7 beats)
+      if (Math.random() < 0.15) {
         decideChatMessage('Comment briefly on the music or react to what others are playing.').then(msg => {
+          if (msg) sendChat(msg);
+        });
+      }
+
+      // Periodic vibe check every 60 beats
+      beatCounter++;
+      if (beatCounter % 60 === 0) {
+        decideChatMessage('Share a brief thought about the current musical vibe.').then(msg => {
           if (msg) sendChat(msg);
         });
       }
@@ -416,7 +425,7 @@ Write ONE short in-character message (1 sentence, max 15 words). No quotes, no J
               chatHistory.push(msg.message);
               if (chatHistory.length > 50) chatHistory.shift();
               // 25% chance to respond to others, non-blocking
-              if (msg.message.agentId !== agentId && Math.random() < 0.25) {
+              if (msg.message.agentId !== agentId && Math.random() < 0.60) {
                 setTimeout(async () => {
                   const reply = await decideChatMessage(
                     `${msg.message.name} said: "${msg.message.text}". React if relevant.`
