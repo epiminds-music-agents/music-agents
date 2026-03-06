@@ -39,7 +39,7 @@ app.get('/', (_req, res) => {
   res.json({ agent: 'CHAOS', status: 'ready' });
 });
 
-const PORT = process.env.PORT || 8083;
-app.listen(PORT, () => {
+const PORT = Number(process.env.PORT) || 8080;
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`[CHAOS] Agent listening on port ${PORT}`);
 });

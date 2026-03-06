@@ -39,7 +39,7 @@ app.get('/', (_req, res) => {
   res.json({ agent: 'WAVE', status: 'ready' });
 });
 
-const PORT = process.env.PORT || 8084;
-app.listen(PORT, () => {
+const PORT = Number(process.env.PORT) || 8080;
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`[WAVE] Agent listening on port ${PORT}`);
 });

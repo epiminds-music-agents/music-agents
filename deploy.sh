@@ -5,8 +5,9 @@ set -e
 PROJECT="project-1a19e976-e840-4179-9fe"
 REGION="europe-north1"
 REPO="music-agents"
-GCLOUD="/c/Users/hatim/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd"
+GCLOUD="/Users/melvinpalmquist/Downloads/google-cloud-sdk/bin/gcloud"
 SA="github-deploy@${PROJECT}.iam.gserviceaccount.com"
+export PATH="$(dirname "$GCLOUD"):$PATH"
 
 # Ensure Artifact Registry repo exists
 "$GCLOUD" artifacts repositories describe "${REPO}" \
@@ -26,6 +27,7 @@ for agent in "${AGENTS[@]}"; do
   IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/agent-${agent}:latest"
 
   docker build \
+    --platform linux/amd64 \
     --build-arg AGENT_DIR="${agent}" \
     -f Dockerfile.agent \
     -t "${IMAGE}" \
