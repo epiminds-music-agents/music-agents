@@ -260,7 +260,9 @@ Write ONE short in-character message (1 sentence, max 15 words). No quotes, no J
     if (loopTimer) return;
     console.log(`[${name}] Starting play loop`);
 
-    // Kick off first plan immediately
+    // Seed with instant fallback moves so agent plays immediately
+    moveQueue = generateFallbackMoves();
+    // Plan next phrase in background (will replace fallback when ready)
     planNextPhrase();
 
     const loop = () => {
