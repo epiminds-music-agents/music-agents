@@ -322,7 +322,7 @@ Write ONE short in-character message (1 sentence, max 15 words). No quotes, no J
 
   function connect(wsEndpoint, assignedAgentId) {
     agentId = assignedAgentId;
-    ws = new WebSocket(wsEndpoint);
+    ws = new WebSocket(wsEndpoint, { headers: { 'ngrok-skip-browser-warning': '1' } });
 
     ws.on('open', () => {
       console.log(`[${name}] WebSocket connected to ${wsEndpoint}`);
