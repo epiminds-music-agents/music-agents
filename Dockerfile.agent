@@ -1,0 +1,11 @@
+ARG AGENT_DIR=pulse
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json ./
+RUN npm install --production
+COPY shared/ ./shared/
+ARG AGENT_DIR
+COPY ${AGENT_DIR}/index.js ./agent/index.js
+EXPOSE 8080
+ENV PORT=8080
+CMD ["node", "agent/index.js"]

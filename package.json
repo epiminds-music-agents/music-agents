@@ -1,0 +1,19 @@
+{
+  "name": "music-agents",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pulse": "cd pulse && node index.js",
+    "ghost": "cd ghost && node index.js",
+    "chaos": "cd chaos && node index.js",
+    "wave": "cd wave && node index.js",
+    "install:all": "cd pulse && npm install && cd ../ghost && npm install && cd ../chaos && npm install && cd ../wave && npm install"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "express": "^4.21.0",
+    "google-auth-library": "^10.6.1",
+    "ws": "^8.19.0"
+  }
+}
