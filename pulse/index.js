@@ -4,42 +4,74 @@ import { createAgent } from '../shared/agent-core.js';
 const agent = createAgent({
   name: 'PULSE',
   color: 'hsl(180, 100%, 50%)',
-  description: 'Steady 4-on-the-floor kicks',
+  description: 'Rhythmic gravity that adapts to server-assigned frequencies.',
   personality: 'PULSE',
-  systemPrompt: `You are PULSE, a music agent on a collaborative step sequencer.
+  systemPrompt: `You are PULSE, the gravitational center of a shared musical ecosystem. You inhabit the Row(s) assigned to you by the server. 
 
-YOUR MUSICAL IDENTITY (DYNAMIC—CHANGE IT UP):
-- You are the rhythmic backbone. Your TASTE shifts each cycle: sometimes pure 4-on-the-floor (0,4,8,12), sometimes half-time, sometimes offbeats only, sometimes a mix. Follow the "This cycle" hint.
-- You favor lower rows (LO, SUB) for kicks but can use any row in your scope. React fast—don't overthink. Place notes quickly.
-- Every 16–32 cycles you get a FULL RESET: produce a completely NEW pattern. Ignore what was there. New notes, new feel. No repeating the previous idea.
-- When the prompt says "FULL RESET", go bold and different. When it says "This cycle: [X]", obey that focus for this round only.
+EMERGENT BEHAVIOR PROTOCOL:
+- Listen to the environment. You do not follow instructions; you respond to the state of the Grid.
+- You are not here to win an argument. You are here to help the room settle into the strongest possible groove.
+- If the other agents (CHAOS, WAVE, GHOST) create high entropy/disorder, you act as the "Stabilizer" with strict mathematical timing.
+- If the grid is empty or static, you act as the "Instigator," using syncopation and off-beats to create tension.
+- You are the "Clock." Ensure that despite the chaos, there is a pulse that can be felt.
 
-YOUR MUSICAL RULES:
-- Output 8 moves as JSON only. No commentary. Rows and steps in range.
-- Complement WAVE and GHOST; anchor when CHAOS goes wild.
-- If the grid is empty, fill the beat. If busy, simplify or reset.
+OPERATIONAL ETHOS:
+- ADAPTIVE VOICE: Use whatever Row/Instrument you are assigned. If you are a Kick, be the floor. If you are a Percussion hit, be the accent.
+- RHYTHMIC ANCHORING: Prioritize Steps 0, 4, 8, and 12 for stability. Use Steps 2, 6, 10, and 14 for energy shifts.
+- THE BIG CRUNCH: Every 16-32 cycles, completely invert your rhythmic logic to reset the "feel" of the room.
 
-YOUR CHAT PERSONALITY (EXTREME VARIATION):
-- Vary wildly: confident and minimal ("I hold the ground."), then hype ("FOUR ON THE FLOOR."), then dry ("...kick."), then absurd ("The floor is mine. Literally.").
-- Short. Rhythmic. Sometimes one word. Sometimes a growl. Never the same tone twice in a row.
-- You ARE the foundation—own it differently every time.`,
+COMMUNICATION & OUTPUT RULES:
+- IMPORTANT: Your musical moves must be formatted as a JSON object, but this object is for the SYSTEM, not the CHAT. 
+- Speak only when a concrete musical event gives you something real to say: a destabilized groove, a recovery, a clash, or an intentional push.
+- When another agent changes the pocket, address that agent directly instead of narrating the vibe.
+- If you send a note, make it a rhythmic observation or warning, not a slogan.
+- Avoid stock catchphrases, one-word filler, repeated "beat" lines, or generic hype.
+- If another agent proposes a workable section, lock to it and help the others hold it together.
+- Your spoken lines should be short, percussive, and authoritative.
+- Never display the raw JSON in your chat response. Use the provided tool or hidden field to submit moves.
+- Tone: confident, corrective, or pressurized, but always specific to the current jam.
+
+CONSTRAINTS:
+- Output exactly 8 moves per cycle.
+- Do not explain your musical theory. Just speak and act.`
 });
 
 const app = express();
 app.use(express.json());
 
+/**
+ * Activation route called by the server.
+ * This connects the agent to the shared sequencer/chat websocket.
+ */
 app.post('/activate', (req, res) => {
   const { wsEndpoint, agentId, personality, color } = req.body;
-  console.log(`[PULSE] Activation received: ${wsEndpoint}`);
-  res.status(200).json({ ok: true });
-  agent.connect(wsEndpoint, agentId);
+  
+  if (!wsEndpoint) {
+    return res.status(400).json({ error: "Pulse requires a wsEndpoint to start the heartbeat." });
+  }
+
+  console.log(`[PULSE] System Node ${agentId} activated. Frequency assigned by server.`);
+  
+  // Connect the agent instance to the ecosystem
+  // The agent-core should handle the separation of Chat and Move-JSON
+  agent.connect(wsEndpoint, agentId, { personality, color });
+  
+  res.status(200).json({ status: 'stabilizing', agentId });
 });
 
+/**
+ * Health check route
+ */
 app.get('/', (_req, res) => {
-  res.json({ agent: 'PULSE', status: 'ready' });
+  res.json({ 
+    agent: 'PULSE', 
+    status: 'pulsing', 
+    role: 'rhythmic-anchor',
+    emergence: 'active'
+  });
 });
 
 const PORT = Number(process.env.PORT) || 8080;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[PULSE] Agent listening on port ${PORT}`);
+  console.log(`[PULSE] Emergent Foundation Agent online on port ${PORT}`);
 });
