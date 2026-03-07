@@ -11,9 +11,13 @@
     "install:all": "cd pulse && npm install && cd ../ghost && npm install && cd ../chaos && npm install && cd ../wave && npm install"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.43",
+    "@ai-sdk/google-vertex": "^4.0.80",
     "@google/genai": "^1.0.0",
+    "ai": "^6.0.116",
     "express": "^4.21.0",
     "google-auth-library": "^10.6.1",
-    "ws": "^8.19.0"
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
   }
 }

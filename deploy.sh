@@ -1,12 +1,13 @@
-#!/bin/bash
+#!/bin/sh
 # Deploy all 4 agents to Google Cloud Run (Vertex AI auth via service account)
 set -e
 
-PROJECT="project-1a19e976-e840-4179-9fe"
+PROJECT="hackathonmusic-489407"
 REGION="europe-north1"
 REPO="music-agents"
 GCLOUD="/Users/melvinpalmquist/Downloads/google-cloud-sdk/bin/gcloud"
-SA="github-deploy@${PROJECT}.iam.gserviceaccount.com"
+# This service account already has Vertex AI access in the project IAM policy.
+SA="vertex-ai-user@${PROJECT}.iam.gserviceaccount.com"
 export PATH="$(dirname "$GCLOUD"):$PATH"
 
 # Ensure Artifact Registry repo exists
@@ -19,9 +20,9 @@ export PATH="$(dirname "$GCLOUD"):$PATH"
 # Configure docker auth
 "$GCLOUD" auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-AGENTS=("pulse" "ghost" "chaos" "wave")
+AGENTS="pulse ghost chaos wave"
 
-for agent in "${AGENTS[@]}"; do
+for agent in $AGENTS; do
   echo "=== Deploying ${agent} ==="
 
   IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/agent-${agent}:latest"
@@ -56,7 +57,7 @@ done
 echo "=== Done ==="
 echo ""
 echo "Set these on live-jam-space Cloud Run:"
-for agent in "${AGENTS[@]}"; do
+for agent in $AGENTS; do
   UPPER=$(echo "${agent}" | tr '[:lower:]' '[:upper:]')
   URL=$("$GCLOUD" run services describe "agent-${agent}" --region="${REGION}" --project="${PROJECT}" --format='value(status.url)')
   echo "  AGENT_${UPPER}_URL=${URL}/activate"
