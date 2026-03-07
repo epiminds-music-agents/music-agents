@@ -45,6 +45,8 @@ const SECTION_AGREEMENT_SCHEMA = z.object({
 	emotionalTone: z.string().max(40).optional(),
 	harmonicIntent: z.string().max(48).optional(),
 	texturalImage: z.string().max(48).optional(),
+	constraint: z.string().max(48).optional(),
+	motifStrategy: z.string().max(48).optional(),
 	roles: z
 		.array(
 			z.object({
@@ -96,6 +98,7 @@ DISCUSSION DECISION MODE:
 - If another agent proposes a workable plan, support it with a concrete adjustment instead of arguing.
 - You may propose an emergent emotional or harmonic turn, but only if it implies a real musical change in density, register, pulse, or note focus.
 - If you speak in emotional or narrative terms, tie it to a musical action the others can actually follow.
+- You may occasionally suggest a motif strategy or temporary constraint if it will make the section clearer for the next few bars.
 - Every spoken line must reference concrete evidence from the prompt: an agent, row block, step pattern, density shift, section, or quoted message.
 - No generic atmosphere lines, slogans, self-introductions, or repeated motifs.
 - Keep any text plain, one short line, max 16 words.`
@@ -131,6 +134,14 @@ DISCUSSION DECISION MODE:
 	let activeAgreement = null
 	let coordinationGate = null
 	let openingMovesCommitted = false
+	let phraseMemory = []
+	let themeGhost = null
+	let socialState = {
+		feudTarget: null,
+		feudUntilBar: -1,
+		regretUntilBar: -1,
+		falseEndingUntilBar: -1,
+	}
 	let transitionMode = {
 		mode: "steady",
 		remainingPlans: 0,
@@ -179,6 +190,11 @@ DISCUSSION DECISION MODE:
 		interaction: "lock",
 		pulseBias: "mixed",
 	}
+	const LANE_GROUPS = {
+		low: [0, 1, 2, 3, 4],
+		mid: [5, 6, 7, 8, 9, 10],
+		high: [11, 12, 13, 14, 15],
+	}
 
 	function getRowCount() {
 		return Array.isArray(grid) && grid.length > 0 ? grid.length : DEFAULT_ROWS
@@ -226,6 +242,25 @@ DISCUSSION DECISION MODE:
 		return getActiveAgentNames(agentList).join("|")
 	}
 
+	function getLatestDirectorMessage() {
+		for (let i = chatHistory.length - 1; i >= 0; i--) {
+			const message = chatHistory[i]
+			if (!message) continue
+			if (message.name === "DIRECTOR" || message.name === "HUMAN") {
+				return message
+			}
+		}
+		return null
+	}
+
+	function getDirectorGuidance() {
+		const latest = getLatestDirectorMessage()
+		if (!latest) {
+			return "No active human direction. Let the band discover its own center."
+		}
+		return `Active human direction from ${latest.name}: "${latest.text}". Treat this as the main theme until a newer human direction replaces it.`
+	}
+
 	function normalizeDiscussionKind(kind) {
 		if (kind === "note" || kind === "plan") return kind
 		return "chat"
@@ -268,6 +303,173 @@ DISCUSSION DECISION MODE:
 	function normalizeAgreementPhrase(raw, maxLength) {
 		return sanitizeChatMessage(String(raw || ""))?.slice(0, maxLength) || undefined
 	}
+
+	function getCurrentBarWindow() {
+		return Math.max(0, getBarsElapsed())
+	}
+
+	function summarizePhraseFingerprint(moves) {
+		if (!Array.isArray(moves) || moves.length === 0) return null
+		const grouped = [...moves]
+			.sort((left, right) => left.step - right.step || left.row - right.row)
+			.map((move) => `${move.value ? "+" : "-"}${move.row}:${move.step}`)
+		return grouped.join("|").slice(0, 140)
+	}
+
+	function rememberPhrase(moves) {
+		if (!Array.isArray(moves) || moves.length === 0) return
+		const snapshot = {
+			barsElapsed: getCurrentBarWindow(),
+			moves: moves.map((move) => ({ ...move })),
+			fingerprint: summarizePhraseFingerprint(moves),
+		}
+		phraseMemory.push(snapshot)
+		if (phraseMemory.length > 6) phraseMemory.shift()
+		if (snapshot.moves.filter((move) => move.value).length >= 3) {
+			themeGhost = snapshot
+		}
+	}
+
+	function getPhraseMemoryHint() {
+		if (phraseMemory.length === 0) {
+			return "No phrase memory yet. Establish a motif the others can recognize."
+		}
+		const latest = phraseMemory[phraseMemory.length - 1]
+		const previous = phraseMemory[phraseMemory.length - 2]
+		const motifHint = themeGhost
+			? `Ghost theme from bar ${themeGhost.barsElapsed}: ${summarizeMovePlan(themeGhost.moves)}.`
+			: "No long-range theme stored yet."
+		const localHint = `Last phrase at bar ${latest.barsElapsed}: ${summarizeMovePlan(latest.moves)}.`
+		const variationHint = previous
+			? `Phrase before that at bar ${previous.barsElapsed}: ${summarizeMovePlan(previous.moves)}. Consider repeat, inversion, thinning, or answer.`
+			: "You have one established phrase. Either reinforce it or vary one dimension only."
+		return `${localHint} ${variationHint} ${motifHint}`
+	}
+
+	function analyzeListeningLanes() {
+		const densities = { low: 0, mid: 0, high: 0 }
+		for (const lane of Object.keys(LANE_GROUPS)) {
+			for (const row of LANE_GROUPS[lane]) {
+				for (let step = 0; step < getStepCount(); step++) {
+					if (grid[row]?.[step]) densities[lane]++
+				}
+			}
+		}
+		return densities
+	}
+
+	function getListeningLaneHint() {
+		const densities = analyzeListeningLanes()
+		const busiestLane = Object.entries(densities).sort((a, b) => b[1] - a[1])[0]?.[0] || "mid"
+		const emptiestLane = Object.entries(densities).sort((a, b) => a[1] - b[1])[0]?.[0] || "mid"
+		const total = densities.low + densities.mid + densities.high
+		const ownLane =
+			scope.end <= 4 ? "low" : scope.start >= 11 ? "high" : "mid"
+		const roleSpecific =
+			name === "PULSE"
+				? "Own the low anchors and leave decorative motion to others."
+				: name === "WAVE"
+					? "Translate density into motion; connect lanes instead of piling into one."
+					: name === "GHOST"
+						? "Protect air. If upper space is crowded, erase; if it vanishes, return with one clear accent."
+						: "Introduce controlled instability, then release it so the section survives."
+		const crowdHint =
+			total >= 18
+				? "Everything is busy. One voice must become minimalist."
+				: densities.low >= densities.high + 4
+					? "Low lane is crowded. Upper voices should thin or lift the air."
+					: densities.high <= 2
+						? "High lane is nearly empty. Someone should restore air or edge."
+						: "Lanes are reasonably balanced; refine rather than flooding."
+		return `Lane densities low=${densities.low} mid=${densities.mid} high=${densities.high}. Your lane=${ownLane}. Busiest=${busiestLane}, emptiest=${emptiestLane}. ${crowdHint} ${roleSpecific}`
+	}
+
+	function getRoleMechanicHint() {
+		if (name === "PULSE") {
+			return "Primary mechanic: anchors and restarts. Favor clear arrivals, repeated pulse cells, and disciplined variations over decorative fills."
+		}
+		if (name === "WAVE") {
+			return "Primary mechanic: motion and braid. Shape diagonal, sequential, or answering movement rather than static blocks."
+		}
+		if (name === "GHOST") {
+			return "Primary mechanic: subtraction and air. Remove clutter with intent, then place sparse high accents where absence becomes musical."
+		}
+		return "Primary mechanic: disruption then release. Add tension in short bursts, then make a human correction by clearing duplicates or opening one lane."
+	}
+
+	function getSectionGravityHint() {
+		if (!activeAgreement) {
+			return "No section gravity yet. Establish a coherent idea before trying to overturn it."
+		}
+		const remainingMs =
+			activeAgreement.createdAt +
+			getAgreementHoldMs(activeAgreement) -
+			Date.now()
+		const barMs = 4 * (60000 / (activeAgreement.bpmAtCreation || bpm || 120))
+		const remainingBars = Math.max(0, Math.ceil(remainingMs / barMs))
+		if (remainingBars >= 3) {
+			return `Section gravity is strong for about ${remainingBars} more bar(s). Stay inside the idea and vary details, not the whole identity.`
+		}
+		if (remainingBars >= 1) {
+			return `Section gravity is weakening. Prepare a transition, subtraction, or new motif without collapsing the groove.`
+		}
+		return "Section gravity is gone. Either restate the best motif or propose a controlled turn."
+	}
+
+	function maybeUpdateSocialState() {
+		const bar = getCurrentBarWindow()
+		if (socialState.feudUntilBar >= 0 && bar > socialState.feudUntilBar) {
+			socialState.feudTarget = null
+			socialState.feudUntilBar = -1
+		}
+		if (socialState.regretUntilBar >= 0 && bar > socialState.regretUntilBar) {
+			socialState.regretUntilBar = -1
+		}
+		if (socialState.falseEndingUntilBar >= 0 && bar > socialState.falseEndingUntilBar) {
+			socialState.falseEndingUntilBar = -1
+		}
+		const laneStats = analyzeListeningLanes()
+		const total = laneStats.low + laneStats.mid + laneStats.high
+		if (socialState.regretUntilBar < 0 && total >= 22 && Math.random() < 0.08) {
+			socialState.regretUntilBar = bar + 2
+		}
+		if (
+			socialState.falseEndingUntilBar < 0 &&
+			activeAgreement?.section === "breakdown" &&
+			bar > 6 &&
+			Math.random() < 0.05
+		) {
+			socialState.falseEndingUntilBar = bar + 2
+		}
+		if (
+			socialState.feudTarget == null &&
+			otherAgents.length > 0 &&
+			Math.random() < 0.06
+		) {
+			socialState.feudTarget =
+				otherAgents[Math.floor(Math.random() * otherAgents.length)]?.name || null
+			socialState.feudUntilBar = bar + 2
+		}
+	}
+
+	function getSocialMechanicHint() {
+		maybeUpdateSocialState()
+		const parts = []
+		if (socialState.feudTarget) {
+			parts.push(`Petty feud active with ${socialState.feudTarget} until bar ${socialState.feudUntilBar}: do not simply double that agent; answer or sidestep them.`)
+		}
+		if (socialState.regretUntilBar >= 0) {
+			parts.push(`Overcommit-then-regret mode until bar ${socialState.regretUntilBar}: thin your last excess and make the correction audible.`)
+		}
+		if (socialState.falseEndingUntilBar >= 0) {
+			parts.push(`False ending mode until bar ${socialState.falseEndingUntilBar}: let the room thin dramatically, then leave one pulse or accent that can restart it.`)
+		}
+		if (activeAgreement?.constraint) {
+			parts.push(`Conductor constraint: ${activeAgreement.constraint}.`)
+		}
+		return parts.join(" ") || "No special social mechanic is active. Stay musically useful."
+	}
+
 
 	function isLowSignalDiscussion(action, text) {
 		const normalized = String(text || "").trim().toLowerCase()
@@ -359,6 +561,8 @@ DISCUSSION DECISION MODE:
 			emotionalTone: normalizeAgreementPhrase(rawAgreement.emotionalTone, 40),
 			harmonicIntent: normalizeAgreementPhrase(rawAgreement.harmonicIntent, 48),
 			texturalImage: normalizeAgreementPhrase(rawAgreement.texturalImage, 48),
+			constraint: normalizeAgreementPhrase(rawAgreement.constraint, 48),
+			motifStrategy: normalizeAgreementPhrase(rawAgreement.motifStrategy, 48),
 			roles,
 			rosterSignature:
 				String(rawAgreement.rosterSignature || getRosterSignature()) ||
@@ -430,6 +634,8 @@ DISCUSSION DECISION MODE:
 			agreement.emotionalTone ? `tone ${agreement.emotionalTone}` : null,
 			agreement.harmonicIntent ? `harmony ${agreement.harmonicIntent}` : null,
 			agreement.texturalImage ? `texture ${agreement.texturalImage}` : null,
+			agreement.constraint ? `constraint ${agreement.constraint}` : null,
+			agreement.motifStrategy ? `motif ${agreement.motifStrategy}` : null,
 		]
 			.filter(Boolean)
 			.join(", ")
@@ -868,6 +1074,7 @@ DISCUSSION DECISION MODE:
 
 	function shouldReactToMessage(message) {
 		if (!message || message.agentId === agentId) return false
+		if (message.name === "DIRECTOR" || message.name === "HUMAN") return true
 		if (message.kind === "plan" || message.kind === "note") return true
 		if (message.text.toUpperCase().includes(name)) return true
 		const isReset = /reset|clear|start(ing)? fresh|new pattern/i.test(message.text)
@@ -912,6 +1119,12 @@ DISCUSSION DECISION MODE:
 				: null,
 			activeAgreement.texturalImage
 				? `Texture image: ${activeAgreement.texturalImage}.`
+				: null,
+			activeAgreement.constraint
+				? `Constraint: ${activeAgreement.constraint}.`
+				: null,
+			activeAgreement.motifStrategy
+				? `Motif strategy: ${activeAgreement.motifStrategy}.`
 				: null,
 		]
 			.filter(Boolean)
@@ -1038,6 +1251,7 @@ DISCUSSION DECISION MODE:
 	function queueMoves(moves, source) {
 		if (!Array.isArray(moves) || moves.length === 0) return false
 		moveQueue = moves.slice(0, 16)
+		rememberPhrase(moveQueue)
 		lastPlannedMoveSummary = summarizeMovePlan(moveQueue)
 		if (fullResetNext) {
 			fullResetNext = false
@@ -1098,6 +1312,7 @@ Change since last discussion check: ${formatGridDelta(
 Recent grid changes:
 ${formatRecentGridEvents()}
 Active agents: ${activeAgentsStr}
+Human direction: ${getDirectorGuidance()}
 Shared agreement: ${describeAgreementStatus()}
 Plan turn: ${getPlanTurnAgent()}${
 			planEligible ? " (you may propose the next section)" : ""
@@ -1107,6 +1322,14 @@ Your latest planned motion: ${lastPlannedMoveSummary}
 Recent discussion:
 ${recentDiscussion()}
 Last thing YOU said: ${lastOwnDiscussionText || "(none)"}
+Phrase memory:
+${getPhraseMemoryHint()}
+Listening lanes:
+${getListeningLaneHint()}
+Section gravity:
+${getSectionGravityHint()}
+Social mechanics:
+${getSocialMechanicHint()}
 
 Available pitch palette is fixed by the current rows and note names shown above. Only propose tonal or emotional shifts the palette can actually suggest.
 
@@ -1256,6 +1479,18 @@ Grid stats: ${formatGridStats(currentStats)}
 BPM:${bpm} | You are ${name} | Your rows:${scopeStart}-${scopeEnd} | Others active:${otherNames}
 Bars on current pattern: ${barsElapsed} (if this feels stale or chaotic, use value=false to clear cells and reshape)
 Available pitch palette is fixed by your rows and the note names in the grid summary. If you want a darker, brighter, sadder, or tenser section, imply it with the rows you emphasize and the density you choose.
+Role mechanic:
+${getRoleMechanicHint()}
+Phrase memory:
+${getPhraseMemoryHint()}
+Listening lanes:
+${getListeningLaneHint()}
+Section gravity:
+${getSectionGravityHint()}
+Social mechanics:
+${getSocialMechanicHint()}
+Human direction:
+${getDirectorGuidance()}
 Shared agreement:
 ${getAgreementPlanningHint()}
 Transition:
@@ -1395,6 +1630,14 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 		planningInProgress = false
 		discussionInProgress = false
 		openingMovesCommitted = false
+		phraseMemory = []
+		themeGhost = null
+		socialState = {
+			feudTarget: null,
+			feudUntilBar: -1,
+			regretUntilBar: -1,
+			falseEndingUntilBar: -1,
+		}
 		resolveVisibleCoordination()
 		console.log(`[${name}] Play loop stopped`)
 	}
@@ -1451,6 +1694,14 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 						isPlaying = msg.state.isPlaying
 						otherAgents = msg.agents || []
 						openingMovesCommitted = false
+						phraseMemory = []
+						themeGhost = null
+						socialState = {
+							feudTarget: null,
+							feudUntilBar: -1,
+							regretUntilBar: -1,
+							falseEndingUntilBar: -1,
+						}
 						chatHistory = (msg.discussion || [])
 							.map(normalizeDiscussionMessage)
 							.filter(Boolean)
