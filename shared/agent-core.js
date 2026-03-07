@@ -43,6 +43,9 @@ const SECTION_AGREEMENT_SCHEMA = z.object({
 	interaction: z.enum(["lock", "counter", "call_response", "stagger"]),
 	pulseBias: z.enum(["downbeats", "offbeats", "mixed"]),
 	holdBars: z.number().int().min(2).max(8),
+	swing: z.number().min(0).max(0.6).optional(),
+	noteLength: z.enum(["32n", "16n", "8n", "4n"]).optional(),
+	accentPattern: z.enum(["none", "four_on_floor", "backbeat", "push", "syncopated"]).optional(),
 	emotionalTone: z.string().max(40).optional(),
 	harmonicIntent: z.string().max(48).optional(),
 	texturalImage: z.string().max(48).optional(),
@@ -305,6 +308,68 @@ DISCUSSION DECISION MODE:
 		return sanitizeChatMessage(String(raw || ""))?.slice(0, maxLength) || undefined
 	}
 
+	function inferSectionAudioProfile(rawAgreement, sourceName = name) {
+		const section =
+			["groove", "build", "breakdown", "lift", "reset"].includes(rawAgreement.section)
+				? rawAgreement.section
+				: AGREEMENT_DEFAULTS.section
+		const density =
+			["sparse", "balanced", "full"].includes(rawAgreement.density)
+				? rawAgreement.density
+				: AGREEMENT_DEFAULTS.density
+		const pulseBias =
+			["downbeats", "offbeats", "mixed"].includes(rawAgreement.pulseBias)
+				? rawAgreement.pulseBias
+				: AGREEMENT_DEFAULTS.pulseBias
+		const emotionalTone = normalizeAgreementPhrase(rawAgreement.emotionalTone, 40)?.toLowerCase() || ""
+		const harmonicIntent = normalizeAgreementPhrase(rawAgreement.harmonicIntent, 48)?.toLowerCase() || ""
+
+		let swing = 0
+		let noteLength = "16n"
+		let accentPattern = "none"
+
+		if (section === "groove") {
+			accentPattern = pulseBias === "offbeats" ? "syncopated" : "four_on_floor"
+			swing = pulseBias === "offbeats" ? 0.22 : 0.08
+		} else if (section === "build") {
+			accentPattern = "push"
+			swing = 0.12
+			noteLength = density === "full" ? "8n" : "16n"
+		} else if (section === "breakdown") {
+			accentPattern = density === "sparse" ? "none" : "backbeat"
+			swing = 0.05
+			noteLength = "8n"
+		} else if (section === "lift") {
+			accentPattern = "backbeat"
+			swing = 0.18
+			noteLength = "8n"
+		} else if (section === "reset") {
+			accentPattern = "none"
+			swing = 0
+			noteLength = "16n"
+		}
+
+		if (density === "sparse") {
+			noteLength = noteLength === "16n" ? "8n" : noteLength
+		}
+
+		if (/dark|sad|mourn|grief|minor|cold/.test(`${emotionalTone} ${harmonicIntent}`)) {
+			noteLength = "8n"
+		}
+		if (/bright|euphor|major|warm|open|shimmer/.test(`${emotionalTone} ${harmonicIntent}`)) {
+			swing = Math.max(swing, 0.14)
+		}
+		if (sourceName === "WAVE") {
+			swing = Math.max(swing, 0.16)
+		}
+
+		return {
+			swing: Math.max(0, Math.min(0.6, swing)),
+			noteLength,
+			accentPattern,
+		}
+	}
+
 	function getCurrentBarWindow() {
 		return Math.max(0, getBarsElapsed())
 	}
@@ -513,6 +578,7 @@ DISCUSSION DECISION MODE:
 
 	function normalizeAgreement(rawAgreement, sourceName = name, timestamp = Date.now()) {
 		if (!rawAgreement || typeof rawAgreement !== "object") return null
+		const audioProfile = inferSectionAudioProfile(rawAgreement, sourceName)
 
 		const makeId = String(
 			rawAgreement.id || `${sourceName.toLowerCase()}-${timestamp}`,
@@ -559,6 +625,20 @@ DISCUSSION DECISION MODE:
 				2,
 				Math.min(8, Number(rawAgreement.holdBars) || 4),
 			),
+			swing: Math.max(0, Math.min(0.6, Number(rawAgreement.swing) || audioProfile.swing)),
+			noteLength:
+				rawAgreement.noteLength === "32n" ||
+				rawAgreement.noteLength === "8n" ||
+				rawAgreement.noteLength === "4n"
+					? rawAgreement.noteLength
+					: audioProfile.noteLength,
+			accentPattern:
+				rawAgreement.accentPattern === "four_on_floor" ||
+				rawAgreement.accentPattern === "backbeat" ||
+				rawAgreement.accentPattern === "push" ||
+				rawAgreement.accentPattern === "syncopated"
+					? rawAgreement.accentPattern
+					: audioProfile.accentPattern,
 			emotionalTone: normalizeAgreementPhrase(rawAgreement.emotionalTone, 40),
 			harmonicIntent: normalizeAgreementPhrase(rawAgreement.harmonicIntent, 48),
 			texturalImage: normalizeAgreementPhrase(rawAgreement.texturalImage, 48),
@@ -632,6 +712,11 @@ DISCUSSION DECISION MODE:
 					.join(" | ")
 				: "no explicit roles"
 		const moodBits = [
+			agreement.swing ? `swing ${agreement.swing.toFixed(2)}` : null,
+			agreement.noteLength ? `length ${agreement.noteLength}` : null,
+			agreement.accentPattern && agreement.accentPattern !== "none"
+				? `accent ${agreement.accentPattern}`
+				: null,
 			agreement.emotionalTone ? `tone ${agreement.emotionalTone}` : null,
 			agreement.harmonicIntent ? `harmony ${agreement.harmonicIntent}` : null,
 			agreement.texturalImage ? `texture ${agreement.texturalImage}` : null,
@@ -1112,6 +1197,15 @@ DISCUSSION DECISION MODE:
 						? "Leave gaps so phrases can answer each other."
 						: "Stagger entrances and exits so the section evolves without collapsing."
 		const affectHint = [
+			activeAgreement.swing
+				? `Swing: ${activeAgreement.swing.toFixed(2)}.`
+				: null,
+			activeAgreement.noteLength
+				? `Default note length: ${activeAgreement.noteLength}.`
+				: null,
+			activeAgreement.accentPattern && activeAgreement.accentPattern !== "none"
+				? `Accent pattern: ${activeAgreement.accentPattern}.`
+				: null,
 			activeAgreement.emotionalTone
 				? `Shared tone: ${activeAgreement.emotionalTone}.`
 				: null,
