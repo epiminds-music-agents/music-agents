@@ -27,6 +27,12 @@ const PLANNED_MOVES_SCHEMA = z.object({
 		)
 		.min(1)
 		.max(16),
+	commentary: z
+		.object({
+			kind: z.enum(["chat", "note"]).default("note"),
+			text: z.string().max(160),
+		})
+		.optional(),
 })
 
 const SECTION_AGREEMENT_SCHEMA = z.object({
@@ -36,6 +42,9 @@ const SECTION_AGREEMENT_SCHEMA = z.object({
 	interaction: z.enum(["lock", "counter", "call_response", "stagger"]),
 	pulseBias: z.enum(["downbeats", "offbeats", "mixed"]),
 	holdBars: z.number().int().min(2).max(8),
+	emotionalTone: z.string().max(40).optional(),
+	harmonicIntent: z.string().max(48).optional(),
+	texturalImage: z.string().max(48).optional(),
 	roles: z
 		.array(
 			z.object({
@@ -85,6 +94,8 @@ DISCUSSION DECISION MODE:
 - Prefer convergence over conflict. If a workable plan already exists, reinforce it or call stay_silent.
 - Only propose a plan when the roster changed, the section expired, or the current grid proves the plan has gone stale.
 - If another agent proposes a workable plan, support it with a concrete adjustment instead of arguing.
+- You may propose an emergent emotional or harmonic turn, but only if it implies a real musical change in density, register, pulse, or note focus.
+- If you speak in emotional or narrative terms, tie it to a musical action the others can actually follow.
 - Every spoken line must reference concrete evidence from the prompt: an agent, row block, step pattern, density shift, section, or quoted message.
 - No generic atmosphere lines, slogans, self-introductions, or repeated motifs.
 - Keep any text plain, one short line, max 16 words.`
@@ -254,6 +265,10 @@ DISCUSSION DECISION MODE:
 		return text.slice(0, 280)
 	}
 
+	function normalizeAgreementPhrase(raw, maxLength) {
+		return sanitizeChatMessage(String(raw || ""))?.slice(0, maxLength) || undefined
+	}
+
 	function isLowSignalDiscussion(action, text) {
 		const normalized = String(text || "").trim().toLowerCase()
 		if (!normalized) return true
@@ -275,7 +290,7 @@ DISCUSSION DECISION MODE:
 			mentionsAgent ||
 			/\brows?\s+\d/.test(normalized) ||
 			/\bsteps?\s+\d/.test(normalized) ||
-			/\b(offbeat|downbeat|groove|build|breakdown|lift|reset|stagger|lock|counter|clear|remove|add|anchor|syncop|density|section)\b/.test(
+			/\b(offbeat|downbeat|groove|build|breakdown|lift|reset|stagger|lock|counter|clear|remove|add|anchor|syncop|density|section|minor|major|modal|dark|bright|sad|grief|mourn|joy|warm|cold|tense|release|resolve|disson|conson|texture|register|palette)\b/.test(
 				normalized,
 			)
 
@@ -341,6 +356,9 @@ DISCUSSION DECISION MODE:
 				2,
 				Math.min(8, Number(rawAgreement.holdBars) || 4),
 			),
+			emotionalTone: normalizeAgreementPhrase(rawAgreement.emotionalTone, 40),
+			harmonicIntent: normalizeAgreementPhrase(rawAgreement.harmonicIntent, 48),
+			texturalImage: normalizeAgreementPhrase(rawAgreement.texturalImage, 48),
 			roles,
 			rosterSignature:
 				String(rawAgreement.rosterSignature || getRosterSignature()) ||
@@ -408,7 +426,14 @@ DISCUSSION DECISION MODE:
 					.map((role) => `${role.agent}:${role.task}`)
 					.join(" | ")
 				: "no explicit roles"
-		return `${agreement.section}, density ${agreement.density}, interaction ${agreement.interaction}, pulse ${agreement.pulseBias}, hold ${agreement.holdBars} bars, roles ${roles}`
+		const moodBits = [
+			agreement.emotionalTone ? `tone ${agreement.emotionalTone}` : null,
+			agreement.harmonicIntent ? `harmony ${agreement.harmonicIntent}` : null,
+			agreement.texturalImage ? `texture ${agreement.texturalImage}` : null,
+		]
+			.filter(Boolean)
+			.join(", ")
+		return `${agreement.section}, density ${agreement.density}, interaction ${agreement.interaction}, pulse ${agreement.pulseBias}, hold ${agreement.holdBars} bars${moodBits ? `, ${moodBits}` : ""}, roles ${roles}`
 	}
 
 	function describeAgreementStatus() {
@@ -878,10 +903,23 @@ DISCUSSION DECISION MODE:
 					: activeAgreement.interaction === "call_response"
 						? "Leave gaps so phrases can answer each other."
 						: "Stagger entrances and exits so the section evolves without collapsing."
+		const affectHint = [
+			activeAgreement.emotionalTone
+				? `Shared tone: ${activeAgreement.emotionalTone}.`
+				: null,
+			activeAgreement.harmonicIntent
+				? `Harmonic direction: ${activeAgreement.harmonicIntent}.`
+				: null,
+			activeAgreement.texturalImage
+				? `Texture image: ${activeAgreement.texturalImage}.`
+				: null,
+		]
+			.filter(Boolean)
+			.join(" ")
 
 		return `Shared section: ${formatAgreement(
 			activeAgreement,
-		)}. Your role: ${role}. ${densityHint} ${pulseHint} ${interactionHint}`
+		)}. Your role: ${role}. ${densityHint} ${pulseHint} ${interactionHint} ${affectHint}`
 	}
 
 	// ── AI calls ──────────────────────────────────────────────────────────
@@ -920,7 +958,7 @@ DISCUSSION DECISION MODE:
 			})
 			const firstCall = toolCalls[0]
 			const input = firstCall?.input ?? firstCall?.args ?? null
-			return input?.moves ?? null
+			return input ?? null
 		} catch (err) {
 			console.error(`[${name}] AI error:`, err?.message || err)
 			return null
@@ -974,11 +1012,15 @@ DISCUSSION DECISION MODE:
 	}
 
 	function normalizeMoves(rawMoves) {
-		if (!Array.isArray(rawMoves)) return []
+		const candidateMoves = Array.isArray(rawMoves?.moves)
+			? rawMoves.moves
+			: Array.isArray(rawMoves)
+				? rawMoves
+				: []
 		const rows = getScopedRows()
 		const rowSet = new Set(rows)
 		const maxStep = getStepCount() - 1
-		return rawMoves
+		return candidateMoves
 			.map((move) => ({
 				row: Number(move?.row),
 				step: Number(move?.step),
@@ -1004,6 +1046,15 @@ DISCUSSION DECISION MODE:
 		consumeTransitionMode()
 		console.log(`[${name}] Planned ${moveQueue.length} moves (${source})`)
 		return true
+	}
+
+	function extractPlannedCommentary(rawPlan) {
+		const commentary = rawPlan?.commentary
+		if (!commentary || typeof commentary !== "object") return null
+		const kind = commentary.kind === "chat" ? "chat" : "note"
+		const text = sanitizeChatMessage(commentary.text)
+		if (!text || isLowSignalDiscussion(kind, text)) return null
+		return { kind, text }
 	}
 
 	async function decideDiscussion(triggers) {
@@ -1056,6 +1107,8 @@ Your latest planned motion: ${lastPlannedMoveSummary}
 Recent discussion:
 ${recentDiscussion()}
 Last thing YOU said: ${lastOwnDiscussionText || "(none)"}
+
+Available pitch palette is fixed by the current rows and note names shown above. Only propose tonal or emotional shifts the palette can actually suggest.
 
 ${
 		mustSpeak
@@ -1202,6 +1255,7 @@ When referencing other agents, use their exact name as shown above.`
 Grid stats: ${formatGridStats(currentStats)}
 BPM:${bpm} | You are ${name} | Your rows:${scopeStart}-${scopeEnd} | Others active:${otherNames}
 Bars on current pattern: ${barsElapsed} (if this feels stale or chaotic, use value=false to clear cells and reshape)
+Available pitch palette is fixed by your rows and the note names in the grid summary. If you want a darker, brighter, sadder, or tenser section, imply it with the rows you emphasize and the density you choose.
 Shared agreement:
 ${getAgreementPlanningHint()}
 Transition:
@@ -1212,17 +1266,23 @@ Recent grid changes:
 ${formatRecentGridEvents()}
 Your previous plan: ${lastPlannedMoveSummary}
 
-Output up to 16 moves as JSON: [{"row":N,"step":N,"value":true/false},...]
+Output JSON with:
+- moves: up to 16 objects [{\"row\":N,\"step\":N,\"value\":true/false},...]
+- optional commentary: one short line tied directly to this exact batch
 value=true means turn that cell ON (add a note). value=false means turn it OFF (remove a note).
 Only include moves that actually change the current grid state.
-Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation.`
+Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the JSON fields.`
 
 		const result = await askForMoves(prompt, 350)
 
 		planningInProgress = false
 
 		const parsedMoves = normalizeMoves(result)
+		const plannedCommentary = extractPlannedCommentary(result)
 		if (queueMoves(parsedMoves, "ai")) {
+			if (plannedCommentary) {
+				sendDiscussion(plannedCommentary.kind, plannedCommentary.text)
+			}
 			if (wasFullReset) {
 				activeAgreement = null
 			}
