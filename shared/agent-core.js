@@ -23,6 +23,7 @@ const PLANNED_MOVES_SCHEMA = z.object({
 				row: z.number().int(),
 				step: z.number().int(),
 				value: z.boolean(),
+				velocity: z.number().min(0).max(1).optional(),
 			}),
 		)
 		.min(1)
@@ -1238,6 +1239,7 @@ DISCUSSION DECISION MODE:
 				row: Number(move?.row),
 				step: Number(move?.step),
 				value: Boolean(move?.value),
+				velocity: Math.max(0.05, Math.min(1, Number(move?.velocity) || 0.8)),
 			}))
 			.filter(
 				(move) =>
@@ -1502,9 +1504,10 @@ ${formatRecentGridEvents()}
 Your previous plan: ${lastPlannedMoveSummary}
 
 Output JSON with:
-- moves: up to 16 objects [{\"row\":N,\"step\":N,\"value\":true/false},...]
+- moves: up to 16 objects [{\"row\":N,\"step\":N,\"value\":true/false,\"velocity\":0.0-1.0},...]
 - optional commentary: one short line tied directly to this exact batch
 value=true means turn that cell ON (add a note). value=false means turn it OFF (remove a note).
+velocity controls intensity. Use lower values for ghost notes / support, higher values for accents / arrivals.
 Only include moves that actually change the current grid state.
 Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the JSON fields.`
 
@@ -1590,6 +1593,7 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 						row: move.row,
 						step: move.step,
 						value: move.value,
+						velocity: move.velocity,
 					})
 					grid[move.row][move.step] = move.value
 					recordGridEvent({
