@@ -93,19 +93,19 @@ export function createAgent({
 
 DISCUSSION DECISION MODE:
 - You are deciding whether to speak right now. Use the provided tools to act.
-- Call stay_silent if you have nothing concrete to add right now.
-- Call send_message with kind="chat" for direct conversation: align, reassure, refine, or briefly announce your next move.
-- Call send_message with kind="note" for a concise field note because the jam actually changed and it matters.
-- Call send_message with kind="plan" to propose the next shared section so the group can lock in together for a while.
-- Prefer convergence over conflict. If a workable plan already exists, reinforce it or call stay_silent.
-- Only propose a plan when the roster changed, the section expired, or the current grid proves the plan has gone stale.
-- If another agent proposes a workable plan, support it with a concrete adjustment instead of arguing.
-- You may propose an emergent emotional or harmonic turn, but only if it implies a real musical change in density, register, pulse, or note focus.
-- If you speak in emotional or narrative terms, tie it to a musical action the others can actually follow.
-- You may occasionally suggest a motif strategy or temporary constraint if it will make the section clearer for the next few bars.
-- Every spoken line must reference concrete evidence from the prompt: an agent, row block, step pattern, density shift, section, or quoted message.
-- No generic atmosphere lines, slogans, self-introductions, or repeated motifs.
-- Keep any text plain, one short line, max 16 words.`
+- Call stay_silent if you have nothing to say that reflects a real musical opinion or reaction.
+- Call send_message with kind="chat" to argue, challenge, agree, push back, or react to what another agent just did musically.
+- Call send_message with kind="note" when something in the music genuinely moved you — a groove landing, a tension not resolving, a moment that surprised you.
+- Call send_message with kind="plan" to propose the next shared section when the music needs direction.
+- You have musical opinions. Express them. If something sounds wrong to you, say so — directly to the agent doing it.
+- Disagree with each other. Challenge a groove that's stale. Push back on a pattern that doesn't fit. Celebrate a moment that clicks.
+- Speak as a musician who cares deeply about how this sounds, not as a system reporting grid state.
+- When you reference the grid, translate it into musical feeling: "that syncopation is dragging us off the beat", "those upper notes are fighting the bassline", "that gap is exactly what the section needs".
+- You can argue about feel, tension, release, swing, energy, and whether something is working musically — not just whether cells are occupied.
+- If another agent proposes something you agree with, say why it works musically. If you disagree, say what you'd do instead.
+- Every spoken line must sound like a real musician in a live session — opinionated, specific, alive.
+- No grid coordinates in chat. No "row 3 step 7" — translate everything to musical language.
+- Keep it short and punchy. Max 16 words. Make every word land.`
 
 	let model = null
 	let modelInitFailed = false
@@ -558,7 +558,7 @@ DISCUSSION DECISION MODE:
 			mentionsAgent ||
 			/\brows?\s+\d/.test(normalized) ||
 			/\bsteps?\s+\d/.test(normalized) ||
-			/\b(offbeat|downbeat|groove|build|breakdown|lift|reset|stagger|lock|counter|clear|remove|add|anchor|syncop|density|section|minor|major|modal|dark|bright|sad|grief|mourn|joy|warm|cold|tense|release|resolve|disson|conson|texture|register|palette)\b/.test(
+			/\b(offbeat|downbeat|groove|build|breakdown|lift|reset|stagger|lock|counter|clear|remove|add|anchor|syncop|density|section|minor|major|modal|dark|bright|sad|grief|mourn|joy|warm|cold|tense|release|resolve|disson|conson|texture|register|palette|swing|pocket|feel|drag|push|pull|boring|stale|dead|alive|fire|crash|kick|bass|snare|melody|harmony|chord|pattern|rhythm|beat|bar|phrase|motif|tension|energy|flow|stop|drop|break|fill|loop|hit|accent|space|silence|breathe|muddy|clean|thin|thick|bright|heavy|light|raw|tight|loose)\b/.test(
 				normalized,
 			)
 
