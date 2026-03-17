@@ -1,6 +1,8 @@
 #!/bin/sh
 # Deploy all 4 agents to Google Cloud Run (Vertex AI auth via service account)
-set -e
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 PROJECT="hackathonmusic-489407"
 REGION="europe-north1"
@@ -10,14 +12,19 @@ GCLOUD="/Users/melvinpalmquist/Downloads/google-cloud-sdk/bin/gcloud"
 SA="vertex-ai-user@${PROJECT}.iam.gserviceaccount.com"
 export PATH="$(dirname "$GCLOUD"):$PATH"
 
+ACTIVE_ACCOUNT=$("$GCLOUD" auth list --filter=status:ACTIVE --format='value(account)')
+echo "Deploying with gcloud account: ${ACTIVE_ACCOUNT}"
+
 # Ensure Artifact Registry repo exists
+echo "Checking Artifact Registry repository ${REPO} in ${REGION}..."
 "$GCLOUD" artifacts repositories describe "${REPO}" \
   --location="${REGION}" --project="${PROJECT}" 2>/dev/null || \
 "$GCLOUD" artifacts repositories create "${REPO}" \
   --repository-format=docker \
   --location="${REGION}" --project="${PROJECT}"
 
-# Configure docker auth
+# Configure docker auth via gcloud's credential helper.
+echo "Configuring Docker auth for ${REGION}-docker.pkg.dev via gcloud..."
 "$GCLOUD" auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
 AGENTS="pulse ghost chaos wave"
@@ -30,9 +37,9 @@ for agent in $AGENTS; do
   docker build \
     --platform linux/amd64 \
     --build-arg AGENT_DIR="${agent}" \
-    -f Dockerfile.agent \
+    -f "${SCRIPT_DIR}/Dockerfile.agent" \
     -t "${IMAGE}" \
-    .
+    "${SCRIPT_DIR}"
 
   docker push "${IMAGE}"
 
@@ -59,6 +66,6 @@ echo ""
 echo "Set these on live-jam-space Cloud Run:"
 for agent in $AGENTS; do
   UPPER=$(echo "${agent}" | tr '[:lower:]' '[:upper:]')
-  URL=$("$GCLOUD" run services describe "agent-${agent}" --region="${REGION}" --project="${PROJECT}" --format='value(status.url)')
-  echo "  AGENT_${UPPER}_URL=${URL}/activate"
+  SERVICE_URL=$("$GCLOUD" run services describe "agent-${agent}" --region="${REGION}" --project="${PROJECT}" --format='value(status.url)')
+  printf '  AGENT_%s_URL=%s/activate\n' "${UPPER}" "${SERVICE_URL}"
 done

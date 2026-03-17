@@ -33,18 +33,20 @@ const app = express();
 app.use(express.json());
 
 app.post('/activate', (req, res) => {
-  const { wsEndpoint, agentId, personality, color } = req.body;
-  
+  const { wsEndpoint, agentId } = req.body;
+
   if (!wsEndpoint) {
     return res.status(400).json({ error: "GHOST needs a medium (wsEndpoint) to manifest." });
   }
 
   console.log(`[GHOST] Manifesting at node: ${agentId}`);
-  
-  // Connect with server-assigned overrides
-  agent.connect(wsEndpoint, agentId, { personality, color });
-  
+  agent.connect(wsEndpoint, agentId);
   res.status(200).json({ status: 'manifested', agentId });
+});
+
+app.post('/deactivate', (_req, res) => {
+  agent.disconnect();
+  res.status(200).json({ status: 'disconnected' });
 });
 
 app.get('/', (_req, res) => {

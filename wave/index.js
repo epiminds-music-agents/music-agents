@@ -49,6 +49,11 @@ app.post('/activate', (req, res) => {
   res.status(200).json({ status: 'flowing', agentId });
 });
 
+app.post('/deactivate', (_req, res) => {
+  agent.disconnect();
+  res.status(200).json({ status: 'disconnected' });
+});
+
 app.get('/', (_req, res) => {
   res.json({ agent: 'WAVE', status: 'ready', type: 'fluid-kinetic' });
 });

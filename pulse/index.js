@@ -37,19 +37,20 @@ app.use(express.json());
  * This connects the agent to the shared sequencer/chat websocket.
  */
 app.post('/activate', (req, res) => {
-  const { wsEndpoint, agentId, personality, color } = req.body;
-  
+  const { wsEndpoint, agentId } = req.body;
+
   if (!wsEndpoint) {
     return res.status(400).json({ error: "Pulse requires a wsEndpoint to start the heartbeat." });
   }
 
   console.log(`[PULSE] System Node ${agentId} activated. Frequency assigned by server.`);
-  
-  // Connect the agent instance to the ecosystem
-  // The agent-core should handle the separation of Chat and Move-JSON
-  agent.connect(wsEndpoint, agentId, { personality, color });
-  
+  agent.connect(wsEndpoint, agentId);
   res.status(200).json({ status: 'stabilizing', agentId });
+});
+
+app.post('/deactivate', (_req, res) => {
+  agent.disconnect();
+  res.status(200).json({ status: 'disconnected' });
 });
 
 /**

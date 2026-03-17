@@ -35,10 +35,15 @@ const app = express()
 app.use(express.json())
 
 app.post("/activate", (req, res) => {
-	const { wsEndpoint, agentId, personality, color } = req.body
+	const { wsEndpoint, agentId } = req.body
 	console.log(`[CHAOS] Activation received: ${wsEndpoint}`)
-	res.status(200).json({ ok: true })
 	agent.connect(wsEndpoint, agentId)
+	res.status(200).json({ ok: true })
+})
+
+app.post("/deactivate", (_req, res) => {
+	agent.disconnect()
+	res.status(200).json({ status: "disconnected" })
 })
 
 app.get("/", (_req, res) => {

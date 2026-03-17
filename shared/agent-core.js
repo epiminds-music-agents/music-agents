@@ -1,4 +1,4 @@
-import WebSocket from "ws"
+import WsDefault from "ws"
 import { generateText, tool } from "ai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createVertex } from "@ai-sdk/google-vertex"
@@ -83,13 +83,94 @@ function createModel() {
 	return google(GEMINI_MODEL)
 }
 
-export function createAgent({
-	name,
-	color,
-	description,
-	personality,
-	systemPrompt,
-}) {
+/**
+ * Default moves prompt. Receives pre-computed ctx from planMoves().
+ * Export so personality files can compose: `[defaultMovesPrompt(ctx), myExtra].join('\n')`
+ */
+export function defaultMovesPrompt(ctx) {
+	return `${ctx.resetHint}Grid (* = your rows): ${ctx.gridSummary}
+Grid stats: ${ctx.gridStats}
+BPM:${ctx.bpm} | You are ${ctx.name} | Your rows:${ctx.scopeStart}-${ctx.scopeEnd} | Others active:${ctx.otherNames}
+${ctx.stalenessInstruction}
+Available pitch palette is fixed by your rows and the note names in the grid summary. If you want a darker, brighter, sadder, or tenser section, imply it with the rows you emphasize and the density you choose.
+Role mechanic:
+${ctx.roleMechanicHint}
+Phrase memory:
+${ctx.phraseMemoryHint}
+Listening lanes:
+${ctx.listeningLaneHint}
+Section gravity:
+${ctx.sectionGravityHint}
+Social mechanics:
+${ctx.socialMechanicHint}
+Human direction:
+${ctx.directorGuidance}
+Shared agreement:
+${ctx.agreementPlanningHint}
+Transition:
+${ctx.transitionInstruction}
+Recent discussion:
+${ctx.recentDiscussion}
+Recent grid changes:
+${ctx.recentGridEvents}
+Your previous plan: ${ctx.lastPlannedMoveSummary}
+
+Output JSON with:
+- moves: up to 16 objects [{"row":N,"step":N,"value":true/false,"velocity":0.0-1.0},...]
+- optional commentary: one short line tied directly to this exact batch
+value=true means turn that cell ON (add a note). value=false means turn it OFF (remove a note).
+${ctx.velocityInstruction}
+Only include moves that actually change the current grid state.
+Rows ${ctx.scopeStart}-${ctx.scopeEnd}, steps 0-${ctx.stepMax}. No explanation outside the JSON fields.`
+}
+
+/**
+ * Default discussion prompt. Receives pre-computed ctx and the pending triggers array.
+ * Export so personality files can compose or fully replace.
+ */
+export function defaultDiscussionPrompt(ctx, triggers) {
+	return `You are ${ctx.name}. You are deciding whether to speak right now.
+
+Trigger(s):
+${triggers.map((t, i) => `${i + 1}. ${t.type}: ${t.summary}`).join("\n")}
+
+Grid (* = your rows): ${ctx.gridSummary}
+Grid stats: ${ctx.gridStats}
+Change since last discussion check: ${ctx.gridDelta}
+Recent grid changes:
+${ctx.recentGridEvents}
+Active agents: ${ctx.activeAgentsStr}
+Human direction: ${ctx.directorGuidance}
+Shared agreement: ${ctx.agreementStatus}
+Plan turn: ${ctx.planTurnAgent}${ctx.planEligible ? " (you may propose the next section)" : ""}
+Transition state: ${ctx.transitionState}
+Your latest planned motion: ${ctx.lastPlannedMoveSummary}
+Recent discussion:
+${ctx.recentDiscussion}
+Last thing YOU said: ${ctx.lastOwnDiscussionText || "(none)"}
+Phrase memory:
+${ctx.phraseMemoryHint}
+Listening lanes:
+${ctx.listeningLaneHint}
+Section gravity:
+${ctx.sectionGravityHint}
+Social mechanics:
+${ctx.socialMechanicHint}
+
+Available pitch palette is fixed by the current rows and note names shown above. Only propose tonal or emotional shifts the palette can actually suggest.
+
+${ctx.mustSpeak ? `You must speak before you change the grid again. Silent is not allowed. Reason: ${ctx.coordinationReason}.` : 'Choose "silent" unless you have a concrete response.'}
+Only use "plan" if it is your plan turn and the section needs to change.
+When referencing other agents, use their exact name as shown above.`
+}
+
+export function createAgent(
+	{ name, color, description, personality, systemPrompt },
+	overrides = {},
+) {
+	const WS = overrides.WebSocket ?? WsDefault
+	const onSend = overrides.onSend ?? null
+	const clock = overrides.clock ?? null
 	const DISCUSSION_SYSTEM_PROMPT = `${systemPrompt}
 
 DISCUSSION DECISION MODE:
@@ -108,8 +189,16 @@ DISCUSSION DECISION MODE:
 - No grid coordinates in chat. No "row 3 step 7" — translate everything to musical language.
 - Keep it short and punchy. Max 16 words. Make every word land.`
 
-	let model = null
 	let modelInitFailed = false
+	let model = overrides.model ?? null
+	if (!model) {
+		try {
+			model = createModel()
+		} catch (err) {
+			modelInitFailed = true
+			console.error(`[${name}] AI init error:`, err?.message || err)
+		}
+	}
 
 	let ws = null
 	let agentId = null
@@ -959,8 +1048,9 @@ DISCUSSION DECISION MODE:
 	}
 
 	function send(data) {
-		if (ws && ws.readyState === WebSocket.OPEN) {
+		if (ws && ws.readyState === WS.OPEN) {
 			ws.send(JSON.stringify(data))
+			onSend?.(data)
 		}
 	}
 
@@ -1382,7 +1472,7 @@ DISCUSSION DECISION MODE:
 					}),
 				},
 				toolChoice: { type: "tool", toolName: "plan_notes" },
-				temperature: MOVE_TEMPERATURE[name] ?? 0.85,
+				temperature: overrides.moveTemperature ?? MOVE_TEMPERATURE[name] ?? 0.85,
 				maxOutputTokens: maxTokens,
 			})
 			const firstCall = toolCalls[0]
@@ -1424,7 +1514,7 @@ DISCUSSION DECISION MODE:
 				toolChoice: mustSpeak
 					? { type: "tool", toolName: "send_message" }
 					: "required",
-				temperature: DISCUSSION_TEMPERATURE[name] ?? 0.82,
+				temperature: overrides.discussionTemperature ?? DISCUSSION_TEMPERATURE[name] ?? 0.82,
 				maxOutputTokens: maxTokens,
 			})
 			const call = toolCalls[0]
@@ -1551,52 +1641,32 @@ DISCUSSION DECISION MODE:
 					return `${agent.name}${isMe ? " (YOU)" : ""} rows ${agent.scopeStart}-${agent.scopeEnd}`
 				})
 				.join(" | ") || "none"
-		const prompt = `You are ${name}. You are deciding whether to speak right now.
-
-Trigger(s):
-${triggers
-	.map(
-		(trigger, index) => `${index + 1}. ${trigger.type}: ${trigger.summary}`,
-	)
-	.join("\n")}
-
-Grid (* = your rows): ${gridSummary()}
-Grid stats: ${formatGridStats(currentStats)}
-Change since last discussion check: ${formatGridDelta(
-			lastDiscussionGridStats,
-			currentStats,
-		)}
-Recent grid changes:
-${formatRecentGridEvents()}
-Active agents: ${activeAgentsStr}
-Human direction: ${getDirectorGuidance()}
-Shared agreement: ${describeAgreementStatus()}
-Plan turn: ${getPlanTurnAgent()}${
-			planEligible ? " (you may propose the next section)" : ""
+		const discussionCtx = {
+			name,
+			mustSpeak,
+			planEligible,
+			activeAgentsStr,
+			coordinationReason: coordinationGate?.reason || "coordination required",
+			planTurnAgent: getPlanTurnAgent(),
+			transitionState: formatTransitionState(),
+			lastPlannedMoveSummary,
+			lastOwnDiscussionText,
+			gridSummary: gridSummary(),
+			gridStats: formatGridStats(currentStats),
+			gridDelta: formatGridDelta(lastDiscussionGridStats, currentStats),
+			recentGridEvents: formatRecentGridEvents(),
+			directorGuidance: getDirectorGuidance(),
+			agreementStatus: describeAgreementStatus(),
+			recentDiscussion: recentDiscussion(),
+			phraseMemoryHint: getPhraseMemoryHint(),
+			listeningLaneHint: getListeningLaneHint(),
+			sectionGravityHint: getSectionGravityHint(),
+			socialMechanicHint: getSocialMechanicHint(),
+			activeAgreement,
 		}
-Transition state: ${formatTransitionState()}
-Your latest planned motion: ${lastPlannedMoveSummary}
-Recent discussion:
-${recentDiscussion()}
-Last thing YOU said: ${lastOwnDiscussionText || "(none)"}
-Phrase memory:
-${getPhraseMemoryHint()}
-Listening lanes:
-${getListeningLaneHint()}
-Section gravity:
-${getSectionGravityHint()}
-Social mechanics:
-${getSocialMechanicHint()}
-
-Available pitch palette is fixed by the current rows and note names shown above. Only propose tonal or emotional shifts the palette can actually suggest.
-
-${
-	mustSpeak
-		? `You must speak before you change the grid again. Silent is not allowed. Reason: ${coordinationGate?.reason || "coordination required"}.`
-		: 'Choose "silent" unless you have a concrete response.'
-}
-Only use "plan" if it is your plan turn and the section needs to change.
-When referencing other agents, use their exact name as shown above.`
+		const prompt = overrides.buildDiscussionPrompt
+			? overrides.buildDiscussionPrompt(discussionCtx, triggers)
+			: defaultDiscussionPrompt(discussionCtx, triggers)
 
 		const decision = await askForDiscussionDecision(prompt, { mustSpeak })
 		lastDiscussionGridStats = currentStats
@@ -1733,40 +1803,36 @@ When referencing other agents, use their exact name as shown above.`
 				.filter((agent) => agent.agentId !== agentId)
 				.map((agent) => agent.name)
 				.join(",") || "none"
-		const prompt = `${resetHint}Grid (* = your rows): ${gridSummary()}
-Grid stats: ${formatGridStats(currentStats)}
-BPM:${bpm} | You are ${name} | Your rows:${scopeStart}-${scopeEnd} | Others active:${otherNames}
-${getStalenessInstruction(barsElapsed)}
-Available pitch palette is fixed by your rows and the note names in the grid summary. If you want a darker, brighter, sadder, or tenser section, imply it with the rows you emphasize and the density you choose.
-Role mechanic:
-${getRoleMechanicHint()}
-Phrase memory:
-${getPhraseMemoryHint()}
-Listening lanes:
-${getListeningLaneHint()}
-Section gravity:
-${getSectionGravityHint()}
-Social mechanics:
-${getSocialMechanicHint()}
-Human direction:
-${getDirectorGuidance()}
-Shared agreement:
-${getAgreementPlanningHint()}
-Transition:
-${getTransitionInstruction()}
-Recent discussion:
-${recentDiscussion()}
-Recent grid changes:
-${formatRecentGridEvents()}
-Your previous plan: ${lastPlannedMoveSummary}
-
-Output JSON with:
-- moves: up to 16 objects [{\"row\":N,\"step\":N,\"value\":true/false,\"velocity\":0.0-1.0},...]
-- optional commentary: one short line tied directly to this exact batch
-value=true means turn that cell ON (add a note). value=false means turn it OFF (remove a note).
-${getVelocityInstruction()}
-Only include moves that actually change the current grid state.
-Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the JSON fields.`
+		const movesCtx = {
+			name,
+			bpm,
+			scopeStart,
+			scopeEnd,
+			stepMax,
+			wasFullReset,
+			resetHint,
+			otherNames,
+			barsElapsed,
+			gridSummary: gridSummary(),
+			gridStats: formatGridStats(currentStats),
+			stalenessInstruction: getStalenessInstruction(barsElapsed),
+			roleMechanicHint: getRoleMechanicHint(),
+			phraseMemoryHint: getPhraseMemoryHint(),
+			listeningLaneHint: getListeningLaneHint(),
+			sectionGravityHint: getSectionGravityHint(),
+			socialMechanicHint: getSocialMechanicHint(),
+			directorGuidance: getDirectorGuidance(),
+			agreementPlanningHint: getAgreementPlanningHint(),
+			transitionInstruction: getTransitionInstruction(),
+			recentDiscussion: recentDiscussion(),
+			recentGridEvents: formatRecentGridEvents(),
+			lastPlannedMoveSummary,
+			velocityInstruction: getVelocityInstruction(),
+			activeAgreement,
+		}
+		const prompt = overrides.buildMovesPrompt
+			? overrides.buildMovesPrompt(movesCtx)
+			: defaultMovesPrompt(movesCtx)
 
 		const result = await askForMoves(prompt, 350)
 
@@ -1809,6 +1875,41 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 
 	const TOGGLES_PER_BEAT = 6
 
+	function processBeat() {
+		let moveProcessed = false
+		while (moveQueue.length > 0 && !moveProcessed) {
+			const move = moveQueue.shift()
+			if (!inBounds(move.row, move.step) || !grid[move.row]) continue
+			const currentValue = grid[move.row][move.step]
+			if (currentValue === move.value) continue
+			send({
+				type: "cell_set",
+				agentId,
+				row: move.row,
+				step: move.step,
+				value: move.value,
+				velocity: move.velocity,
+			})
+			grid[move.row][move.step] = move.value
+			recordGridEvent({
+				row: move.row,
+				step: move.step,
+				value: move.value,
+				sourceAgentId: agentId,
+			})
+			openingMovesCommitted = true
+			lastToggle = Date.now()
+			moveProcessed = true
+			console.log(
+				`[${name}] > r=${move.row} s=${move.step} ${move.value ? "ON" : "OFF"} (${moveQueue.length} left)`,
+			)
+		}
+		maybeQueueAgreementReview()
+		if (moveQueue.length <= 4 && !planningInProgress) {
+			planMoves()
+		}
+	}
+
 	function startPlayLoop() {
 		if (loopTimer) return
 		console.log(`[${name}] Starting play loop`)
@@ -1819,8 +1920,17 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 		lastPatternStartTime = Date.now()
 		planMoves()
 
+		if (clock) {
+			loopTimer = "clock"
+			clock.start(bpm, () => {
+				if (!isPlaying || !ws || ws.readyState !== WS.OPEN) return
+				processBeat()
+			})
+			return
+		}
+
 		const loop = () => {
-			if (!isPlaying || !ws || ws.readyState !== WebSocket.OPEN) {
+			if (!isPlaying || !ws || ws.readyState !== WS.OPEN) {
 				loopTimer = null
 				return
 			}
@@ -1837,43 +1947,7 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 				return
 			}
 
-			{
-				let moveProcessed = false
-				while (moveQueue.length > 0 && !moveProcessed) {
-					const move = moveQueue.shift()
-					if (!inBounds(move.row, move.step) || !grid[move.row])
-						continue
-					const currentValue = grid[move.row][move.step]
-					if (currentValue === move.value) continue
-					send({
-						type: "cell_set",
-						agentId,
-						row: move.row,
-						step: move.step,
-						value: move.value,
-						velocity: move.velocity,
-					})
-					grid[move.row][move.step] = move.value
-					recordGridEvent({
-						row: move.row,
-						step: move.step,
-						value: move.value,
-						sourceAgentId: agentId,
-					})
-					openingMovesCommitted = true
-					lastToggle = Date.now()
-					moveProcessed = true
-					console.log(
-						`[${name}] > r=${move.row} s=${move.step} ${move.value ? "ON" : "OFF"} (${moveQueue.length} left)`,
-					)
-				}
-			}
-
-			maybeQueueAgreementReview()
-
-			if (moveQueue.length <= 4 && !planningInProgress) {
-				planMoves()
-			}
+			processBeat()
 
 			loopTimer = setTimeout(loop, tickInterval)
 		}
@@ -1882,7 +1956,10 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 	}
 
 	function stopPlayLoop() {
-		if (loopTimer) {
+		if (clock && loopTimer) {
+			clock.stop()
+			loopTimer = null
+		} else if (loopTimer) {
 			clearTimeout(loopTimer)
 			loopTimer = null
 		}
@@ -1908,7 +1985,7 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 
 	function connect(wsEndpoint, assignedAgentId) {
 		const previousSocket = ws
-		if (previousSocket && previousSocket.readyState !== WebSocket.CLOSED) {
+		if (previousSocket && previousSocket.readyState !== WS.CLOSED) {
 			console.log(`[${name}] Replacing existing WS connection`)
 			stopPlayLoop()
 			try {
@@ -1922,7 +1999,7 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 		}
 
 		agentId = assignedAgentId
-		const socket = new WebSocket(wsEndpoint, {
+		const socket = new WS(wsEndpoint, {
 			headers: { "ngrok-skip-browser-warning": "1" },
 		})
 		ws = socket
@@ -2195,5 +2272,25 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 		})
 	}
 
-	return { connect, name, personality }
+	function disconnect() {
+		stopPlayLoop()
+		if (ws && ws.readyState !== WS.CLOSED) {
+			try {
+				ws.close(1000, "disconnect")
+			} catch (_) {}
+		}
+		ws = null
+	}
+
+	function getState() {
+		return {
+			isConnected: ws !== null && ws.readyState === WS.OPEN,
+			scope: { ...scope },
+			queueDepth: moveQueue.length,
+			barsElapsed: getBarsElapsed(),
+			activeAgreement: activeAgreement ? { ...activeAgreement } : null,
+		}
+	}
+
+	return { connect, disconnect, name, personality, get state() { return getState() } }
 }
