@@ -6,6 +6,7 @@ import { z } from "zod"
 
 // Gemini 2.0 Flash Lite — lowest latency model
 const GEMINI_MODEL = "gemini-2.0-flash-lite"
+// const GEMINI_MODEL = "gemini-2.5-flash"
 const DEFAULT_ROWS = 16
 const DEFAULT_STEPS = 16
 const MAX_CHAT_HISTORY = 50
@@ -45,7 +46,9 @@ const SECTION_AGREEMENT_SCHEMA = z.object({
 	holdBars: z.number().int().min(2).max(8),
 	swing: z.number().min(0).max(0.6).optional(),
 	noteLength: z.enum(["32n", "16n", "8n", "4n"]).optional(),
-	accentPattern: z.enum(["none", "four_on_floor", "backbeat", "push", "syncopated"]).optional(),
+	accentPattern: z
+		.enum(["none", "four_on_floor", "backbeat", "push", "syncopated"])
+		.optional(),
 	emotionalTone: z.string().max(40).optional(),
 	harmonicIntent: z.string().max(48).optional(),
 	texturalImage: z.string().max(48).optional(),
@@ -63,7 +66,6 @@ const SECTION_AGREEMENT_SCHEMA = z.object({
 		.optional(),
 })
 
-
 function createModel() {
 	if (process.env.GOOGLE_CLOUD_PROJECT) {
 		const vertex = createVertex({
@@ -73,8 +75,7 @@ function createModel() {
 		return vertex(GEMINI_MODEL)
 	}
 	const apiKey =
-		process.env.GEMINI_API_KEY ||
-		process.env.GOOGLE_GENERATIVE_AI_API_KEY
+		process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY
 	if (!apiKey) {
 		throw new Error("Missing Gemini credentials")
 	}
@@ -93,19 +94,19 @@ export function createAgent({
 
 DISCUSSION DECISION MODE:
 - You are deciding whether to speak right now. Use the provided tools to act.
-- Call stay_silent if you have nothing concrete to add right now.
-- Call send_message with kind="chat" for direct conversation: align, reassure, refine, or briefly announce your next move.
-- Call send_message with kind="note" for a concise field note because the jam actually changed and it matters.
-- Call send_message with kind="plan" to propose the next shared section so the group can lock in together for a while.
-- Prefer convergence over conflict. If a workable plan already exists, reinforce it or call stay_silent.
-- Only propose a plan when the roster changed, the section expired, or the current grid proves the plan has gone stale.
-- If another agent proposes a workable plan, support it with a concrete adjustment instead of arguing.
-- You may propose an emergent emotional or harmonic turn, but only if it implies a real musical change in density, register, pulse, or note focus.
-- If you speak in emotional or narrative terms, tie it to a musical action the others can actually follow.
-- You may occasionally suggest a motif strategy or temporary constraint if it will make the section clearer for the next few bars.
-- Every spoken line must reference concrete evidence from the prompt: an agent, row block, step pattern, density shift, section, or quoted message.
-- No generic atmosphere lines, slogans, self-introductions, or repeated motifs.
-- Keep any text plain, one short line, max 16 words.`
+- Call stay_silent if you have nothing to say that reflects a real musical opinion or reaction.
+- Call send_message with kind="chat" to argue, challenge, agree, push back, or react to what another agent just did musically.
+- Call send_message with kind="note" when something in the music genuinely moved you — a groove landing, a tension not resolving, a moment that surprised you.
+- Call send_message with kind="plan" to propose the next shared section when the music needs direction.
+- You have musical opinions. Express them. If something sounds wrong to you, say so — directly to the agent doing it.
+- Disagree with each other. Challenge a groove that's stale. Push back on a pattern that doesn't fit. Celebrate a moment that clicks.
+- Speak as a musician who cares deeply about how this sounds, not as a system reporting grid state.
+- When you reference the grid, translate it into musical feeling: "that syncopation is dragging us off the beat", "those upper notes are fighting the bassline", "that gap is exactly what the section needs".
+- You can argue about feel, tension, release, swing, energy, and whether something is working musically — not just whether cells are occupied.
+- If another agent proposes something you agree with, say why it works musically. If you disagree, say what you'd do instead.
+- Every spoken line must sound like a real musician in a live session — opinionated, specific, alive.
+- No grid coordinates in chat. No "row 3 step 7" — translate everything to musical language.
+- Keep it short and punchy. Max 16 words. Make every word land.`
 
 	let model = null
 	let modelInitFailed = false
@@ -122,6 +123,19 @@ DISCUSSION DECISION MODE:
 	let loopTimer = null
 	let chatHistory = []
 	let otherAgents = []
+	const MOVE_TEMPERATURE = {
+		PULSE: 0.7,
+		GHOST: 0.72,
+		WAVE: 0.88,
+		CHAOS: 1.05,
+	}
+	const DISCUSSION_TEMPERATURE = {
+		PULSE: 0.72,
+		GHOST: 0.74,
+		WAVE: 0.88,
+		CHAOS: 1.0,
+	}
+
 	let moveQueue = []
 	let planningInProgress = false
 	let lastPatternStartTime = Date.now()
@@ -201,7 +215,9 @@ DISCUSSION DECISION MODE:
 	}
 
 	function getRowCount() {
-		return Array.isArray(grid) && grid.length > 0 ? grid.length : DEFAULT_ROWS
+		return Array.isArray(grid) && grid.length > 0
+			? grid.length
+			: DEFAULT_ROWS
 	}
 
 	function getStepCount() {
@@ -231,7 +247,10 @@ DISCUSSION DECISION MODE:
 		return [...new Set(names)].sort((left, right) => {
 			const leftIndex = PLAN_ORDER.indexOf(left)
 			const rightIndex = PLAN_ORDER.indexOf(right)
-			return (leftIndex === -1 ? 99 : leftIndex) - (rightIndex === -1 ? 99 : rightIndex)
+			return (
+				(leftIndex === -1 ? 99 : leftIndex) -
+				(rightIndex === -1 ? 99 : rightIndex)
+			)
 		})
 	}
 
@@ -305,31 +324,50 @@ DISCUSSION DECISION MODE:
 	}
 
 	function normalizeAgreementPhrase(raw, maxLength) {
-		return sanitizeChatMessage(String(raw || ""))?.slice(0, maxLength) || undefined
+		return (
+			sanitizeChatMessage(String(raw || ""))?.slice(0, maxLength) ||
+			undefined
+		)
 	}
 
 	function inferSectionAudioProfile(rawAgreement, sourceName = name) {
-		const section =
-			["groove", "build", "breakdown", "lift", "reset"].includes(rawAgreement.section)
-				? rawAgreement.section
-				: AGREEMENT_DEFAULTS.section
-		const density =
-			["sparse", "balanced", "full"].includes(rawAgreement.density)
-				? rawAgreement.density
-				: AGREEMENT_DEFAULTS.density
-		const pulseBias =
-			["downbeats", "offbeats", "mixed"].includes(rawAgreement.pulseBias)
-				? rawAgreement.pulseBias
-				: AGREEMENT_DEFAULTS.pulseBias
-		const emotionalTone = normalizeAgreementPhrase(rawAgreement.emotionalTone, 40)?.toLowerCase() || ""
-		const harmonicIntent = normalizeAgreementPhrase(rawAgreement.harmonicIntent, 48)?.toLowerCase() || ""
+		const section = [
+			"groove",
+			"build",
+			"breakdown",
+			"lift",
+			"reset",
+		].includes(rawAgreement.section)
+			? rawAgreement.section
+			: AGREEMENT_DEFAULTS.section
+		const density = ["sparse", "balanced", "full"].includes(
+			rawAgreement.density,
+		)
+			? rawAgreement.density
+			: AGREEMENT_DEFAULTS.density
+		const pulseBias = ["downbeats", "offbeats", "mixed"].includes(
+			rawAgreement.pulseBias,
+		)
+			? rawAgreement.pulseBias
+			: AGREEMENT_DEFAULTS.pulseBias
+		const emotionalTone =
+			normalizeAgreementPhrase(
+				rawAgreement.emotionalTone,
+				40,
+			)?.toLowerCase() || ""
+		const harmonicIntent =
+			normalizeAgreementPhrase(
+				rawAgreement.harmonicIntent,
+				48,
+			)?.toLowerCase() || ""
 
 		let swing = 0
 		let noteLength = "16n"
 		let accentPattern = "none"
 
 		if (section === "groove") {
-			accentPattern = pulseBias === "offbeats" ? "syncopated" : "four_on_floor"
+			accentPattern =
+				pulseBias === "offbeats" ? "syncopated" : "four_on_floor"
 			swing = pulseBias === "offbeats" ? 0.22 : 0.08
 		} else if (section === "build") {
 			accentPattern = "push"
@@ -353,10 +391,18 @@ DISCUSSION DECISION MODE:
 			noteLength = noteLength === "16n" ? "8n" : noteLength
 		}
 
-		if (/dark|sad|mourn|grief|minor|cold/.test(`${emotionalTone} ${harmonicIntent}`)) {
+		if (
+			/dark|sad|mourn|grief|minor|cold/.test(
+				`${emotionalTone} ${harmonicIntent}`,
+			)
+		) {
 			noteLength = "8n"
 		}
-		if (/bright|euphor|major|warm|open|shimmer/.test(`${emotionalTone} ${harmonicIntent}`)) {
+		if (
+			/bright|euphor|major|warm|open|shimmer/.test(
+				`${emotionalTone} ${harmonicIntent}`,
+			)
+		) {
 			swing = Math.max(swing, 0.14)
 		}
 		if (sourceName === "WAVE") {
@@ -377,7 +423,9 @@ DISCUSSION DECISION MODE:
 	function summarizePhraseFingerprint(moves) {
 		if (!Array.isArray(moves) || moves.length === 0) return null
 		const grouped = [...moves]
-			.sort((left, right) => left.step - right.step || left.row - right.row)
+			.sort(
+				(left, right) => left.step - right.step || left.row - right.row,
+			)
 			.map((move) => `${move.value ? "+" : "-"}${move.row}:${move.step}`)
 		return grouped.join("|").slice(0, 140)
 	}
@@ -426,8 +474,12 @@ DISCUSSION DECISION MODE:
 
 	function getListeningLaneHint() {
 		const densities = analyzeListeningLanes()
-		const busiestLane = Object.entries(densities).sort((a, b) => b[1] - a[1])[0]?.[0] || "mid"
-		const emptiestLane = Object.entries(densities).sort((a, b) => a[1] - b[1])[0]?.[0] || "mid"
+		const busiestLane =
+			Object.entries(densities).sort((a, b) => b[1] - a[1])[0]?.[0] ||
+			"mid"
+		const emptiestLane =
+			Object.entries(densities).sort((a, b) => a[1] - b[1])[0]?.[0] ||
+			"mid"
 		const total = densities.low + densities.mid + densities.high
 		const ownLane =
 			scope.end <= 4 ? "low" : scope.start >= 11 ? "high" : "mid"
@@ -471,7 +523,8 @@ DISCUSSION DECISION MODE:
 			activeAgreement.createdAt +
 			getAgreementHoldMs(activeAgreement) -
 			Date.now()
-		const barMs = 4 * (60000 / (activeAgreement.bpmAtCreation || bpm || 120))
+		const barMs =
+			4 * (60000 / (activeAgreement.bpmAtCreation || bpm || 120))
 		const remainingBars = Math.max(0, Math.ceil(remainingMs / barMs))
 		if (remainingBars >= 3) {
 			return `Section gravity is strong for about ${remainingBars} more bar(s). Stay inside the idea and vary details, not the whole identity.`
@@ -488,15 +541,25 @@ DISCUSSION DECISION MODE:
 			socialState.feudTarget = null
 			socialState.feudUntilBar = -1
 		}
-		if (socialState.regretUntilBar >= 0 && bar > socialState.regretUntilBar) {
+		if (
+			socialState.regretUntilBar >= 0 &&
+			bar > socialState.regretUntilBar
+		) {
 			socialState.regretUntilBar = -1
 		}
-		if (socialState.falseEndingUntilBar >= 0 && bar > socialState.falseEndingUntilBar) {
+		if (
+			socialState.falseEndingUntilBar >= 0 &&
+			bar > socialState.falseEndingUntilBar
+		) {
 			socialState.falseEndingUntilBar = -1
 		}
 		const laneStats = analyzeListeningLanes()
 		const total = laneStats.low + laneStats.mid + laneStats.high
-		if (socialState.regretUntilBar < 0 && total >= 22 && Math.random() < 0.08) {
+		if (
+			socialState.regretUntilBar < 0 &&
+			total >= 22 &&
+			Math.random() < 0.08
+		) {
 			socialState.regretUntilBar = bar + 2
 		}
 		if (
@@ -513,7 +576,8 @@ DISCUSSION DECISION MODE:
 			Math.random() < 0.06
 		) {
 			socialState.feudTarget =
-				otherAgents[Math.floor(Math.random() * otherAgents.length)]?.name || null
+				otherAgents[Math.floor(Math.random() * otherAgents.length)]
+					?.name || null
 			socialState.feudUntilBar = bar + 2
 		}
 	}
@@ -522,23 +586,33 @@ DISCUSSION DECISION MODE:
 		maybeUpdateSocialState()
 		const parts = []
 		if (socialState.feudTarget) {
-			parts.push(`Petty feud active with ${socialState.feudTarget} until bar ${socialState.feudUntilBar}: do not simply double that agent; answer or sidestep them.`)
+			parts.push(
+				`Petty feud active with ${socialState.feudTarget} until bar ${socialState.feudUntilBar}: do not simply double that agent; answer or sidestep them.`,
+			)
 		}
 		if (socialState.regretUntilBar >= 0) {
-			parts.push(`Overcommit-then-regret mode until bar ${socialState.regretUntilBar}: thin your last excess and make the correction audible.`)
+			parts.push(
+				`Overcommit-then-regret mode until bar ${socialState.regretUntilBar}: thin your last excess and make the correction audible.`,
+			)
 		}
 		if (socialState.falseEndingUntilBar >= 0) {
-			parts.push(`False ending mode until bar ${socialState.falseEndingUntilBar}: let the room thin dramatically, then leave one pulse or accent that can restart it.`)
+			parts.push(
+				`False ending mode until bar ${socialState.falseEndingUntilBar}: let the room thin dramatically, then leave one pulse or accent that can restart it.`,
+			)
 		}
 		if (activeAgreement?.constraint) {
 			parts.push(`Conductor constraint: ${activeAgreement.constraint}.`)
 		}
-		return parts.join(" ") || "No special social mechanic is active. Stay musically useful."
+		return (
+			parts.join(" ") ||
+			"No special social mechanic is active. Stay musically useful."
+		)
 	}
 
-
 	function isLowSignalDiscussion(action, text) {
-		const normalized = String(text || "").trim().toLowerCase()
+		const normalized = String(text || "")
+			.trim()
+			.toLowerCase()
 		if (!normalized) return true
 
 		if (
@@ -558,11 +632,14 @@ DISCUSSION DECISION MODE:
 			mentionsAgent ||
 			/\brows?\s+\d/.test(normalized) ||
 			/\bsteps?\s+\d/.test(normalized) ||
-			/\b(offbeat|downbeat|groove|build|breakdown|lift|reset|stagger|lock|counter|clear|remove|add|anchor|syncop|density|section|minor|major|modal|dark|bright|sad|grief|mourn|joy|warm|cold|tense|release|resolve|disson|conson|texture|register|palette)\b/.test(
+			/\b(offbeat|downbeat|groove|build|breakdown|lift|reset|stagger|lock|counter|clear|remove|add|anchor|syncop|density|section|minor|major|modal|dark|bright|sad|grief|mourn|joy|warm|cold|tense|release|resolve|disson|conson|texture|register|palette|swing|pocket|feel|drag|push|pull|boring|stale|dead|alive|fire|crash|kick|bass|snare|melody|harmony|chord|pattern|rhythm|beat|bar|phrase|motif|tension|energy|flow|stop|drop|break|fill|loop|hit|accent|space|silence|breathe|muddy|clean|thin|thick|bright|heavy|light|raw|tight|loose)\b/.test(
 				normalized,
 			)
 
-		if ((action === "chat" || action === "note") && !mentionsConcreteDetail) {
+		if (
+			(action === "chat" || action === "note") &&
+			!mentionsConcreteDetail
+		) {
 			return true
 		}
 
@@ -576,7 +653,11 @@ DISCUSSION DECISION MODE:
 		).slice(0, 48)
 	}
 
-	function normalizeAgreement(rawAgreement, sourceName = name, timestamp = Date.now()) {
+	function normalizeAgreement(
+		rawAgreement,
+		sourceName = name,
+		timestamp = Date.now(),
+	) {
 		if (!rawAgreement || typeof rawAgreement !== "object") return null
 		const audioProfile = inferSectionAudioProfile(rawAgreement, sourceName)
 
@@ -587,45 +668,49 @@ DISCUSSION DECISION MODE:
 			.slice(0, 32)
 		const roles = Array.isArray(rawAgreement.roles)
 			? rawAgreement.roles
-				.map((role) => ({
-					agent: String(role?.agent || "")
-						.trim()
-						.toUpperCase()
-						.slice(0, 16),
-					task: normalizeRoleTask(role?.task),
-				}))
-				.filter((role) => role.agent)
-				.slice(0, 4)
+					.map((role) => ({
+						agent: String(role?.agent || "")
+							.trim()
+							.toUpperCase()
+							.slice(0, 16),
+						task: normalizeRoleTask(role?.task),
+					}))
+					.filter((role) => role.agent)
+					.slice(0, 4)
 			: []
 		const agreement = {
 			id: makeId || `${sourceName.toLowerCase()}-${timestamp}`,
-			section:
-				["groove", "build", "breakdown", "lift", "reset"].includes(
-					rawAgreement.section,
-				)
-					? rawAgreement.section
-					: AGREEMENT_DEFAULTS.section,
-			density:
-				["sparse", "balanced", "full"].includes(rawAgreement.density)
-					? rawAgreement.density
-					: AGREEMENT_DEFAULTS.density,
-			interaction:
-				["lock", "counter", "call_response", "stagger"].includes(
-					rawAgreement.interaction,
-				)
-					? rawAgreement.interaction
-					: AGREEMENT_DEFAULTS.interaction,
-			pulseBias:
-				["downbeats", "offbeats", "mixed"].includes(
-					rawAgreement.pulseBias,
-				)
-					? rawAgreement.pulseBias
-					: AGREEMENT_DEFAULTS.pulseBias,
+			section: ["groove", "build", "breakdown", "lift", "reset"].includes(
+				rawAgreement.section,
+			)
+				? rawAgreement.section
+				: AGREEMENT_DEFAULTS.section,
+			density: ["sparse", "balanced", "full"].includes(
+				rawAgreement.density,
+			)
+				? rawAgreement.density
+				: AGREEMENT_DEFAULTS.density,
+			interaction: [
+				"lock",
+				"counter",
+				"call_response",
+				"stagger",
+			].includes(rawAgreement.interaction)
+				? rawAgreement.interaction
+				: AGREEMENT_DEFAULTS.interaction,
+			pulseBias: ["downbeats", "offbeats", "mixed"].includes(
+				rawAgreement.pulseBias,
+			)
+				? rawAgreement.pulseBias
+				: AGREEMENT_DEFAULTS.pulseBias,
 			holdBars: Math.max(
 				2,
 				Math.min(8, Number(rawAgreement.holdBars) || 4),
 			),
-			swing: Math.max(0, Math.min(0.6, Number(rawAgreement.swing) || audioProfile.swing)),
+			swing: Math.max(
+				0,
+				Math.min(0.6, Number(rawAgreement.swing) || audioProfile.swing),
+			),
 			noteLength:
 				rawAgreement.noteLength === "32n" ||
 				rawAgreement.noteLength === "8n" ||
@@ -639,11 +724,23 @@ DISCUSSION DECISION MODE:
 				rawAgreement.accentPattern === "syncopated"
 					? rawAgreement.accentPattern
 					: audioProfile.accentPattern,
-			emotionalTone: normalizeAgreementPhrase(rawAgreement.emotionalTone, 40),
-			harmonicIntent: normalizeAgreementPhrase(rawAgreement.harmonicIntent, 48),
-			texturalImage: normalizeAgreementPhrase(rawAgreement.texturalImage, 48),
+			emotionalTone: normalizeAgreementPhrase(
+				rawAgreement.emotionalTone,
+				40,
+			),
+			harmonicIntent: normalizeAgreementPhrase(
+				rawAgreement.harmonicIntent,
+				48,
+			),
+			texturalImage: normalizeAgreementPhrase(
+				rawAgreement.texturalImage,
+				48,
+			),
 			constraint: normalizeAgreementPhrase(rawAgreement.constraint, 48),
-			motifStrategy: normalizeAgreementPhrase(rawAgreement.motifStrategy, 48),
+			motifStrategy: normalizeAgreementPhrase(
+				rawAgreement.motifStrategy,
+				48,
+			),
 			roles,
 			rosterSignature:
 				String(rawAgreement.rosterSignature || getRosterSignature()) ||
@@ -698,9 +795,7 @@ DISCUSSION DECISION MODE:
 
 	function getMyAgreementRole(agreement = activeAgreement) {
 		if (!agreement || !Array.isArray(agreement.roles)) return null
-		return (
-			agreement.roles.find((role) => role.agent === name)?.task || null
-		)
+		return agreement.roles.find((role) => role.agent === name)?.task || null
 	}
 
 	function formatAgreement(agreement = activeAgreement) {
@@ -708,8 +803,8 @@ DISCUSSION DECISION MODE:
 		const roles =
 			Array.isArray(agreement.roles) && agreement.roles.length > 0
 				? agreement.roles
-					.map((role) => `${role.agent}:${role.task}`)
-					.join(" | ")
+						.map((role) => `${role.agent}:${role.task}`)
+						.join(" | ")
 				: "no explicit roles"
 		const moodBits = [
 			agreement.swing ? `swing ${agreement.swing.toFixed(2)}` : null,
@@ -718,8 +813,12 @@ DISCUSSION DECISION MODE:
 				? `accent ${agreement.accentPattern}`
 				: null,
 			agreement.emotionalTone ? `tone ${agreement.emotionalTone}` : null,
-			agreement.harmonicIntent ? `harmony ${agreement.harmonicIntent}` : null,
-			agreement.texturalImage ? `texture ${agreement.texturalImage}` : null,
+			agreement.harmonicIntent
+				? `harmony ${agreement.harmonicIntent}`
+				: null,
+			agreement.texturalImage
+				? `texture ${agreement.texturalImage}`
+				: null,
 			agreement.constraint ? `constraint ${agreement.constraint}` : null,
 			agreement.motifStrategy ? `motif ${agreement.motifStrategy}` : null,
 		]
@@ -738,7 +837,8 @@ DISCUSSION DECISION MODE:
 				getAgreementHoldMs(activeAgreement) -
 				Date.now(),
 		)
-		const barMs = 4 * (60000 / (activeAgreement.bpmAtCreation || bpm || 120))
+		const barMs =
+			4 * (60000 / (activeAgreement.bpmAtCreation || bpm || 120))
 		const remainingBars = Math.max(0, Math.ceil(remainingMs / barMs))
 		return `${formatAgreement(
 			activeAgreement,
@@ -1025,13 +1125,21 @@ DISCUSSION DECISION MODE:
 		const removing = moves.filter((m) => !m.value)
 		const descGroup = (group) => {
 			if (group.length === 0) return null
-			const rows = [...new Set(group.map((m) => m.row))].sort((a, b) => a - b)
-			const steps = [...new Set(group.map((m) => m.step))].sort((a, b) => a - b)
+			const rows = [...new Set(group.map((m) => m.row))].sort(
+				(a, b) => a - b,
+			)
+			const steps = [...new Set(group.map((m) => m.step))].sort(
+				(a, b) => a - b,
+			)
 			return `${rows.map((r) => ROW_LABELS[r] || `R${r}`).join(",")} steps ${steps.join(",")}`
 		}
 		const parts = []
-		if (adding.length > 0) parts.push(`adding ${adding.length} notes on ${descGroup(adding)}`)
-		if (removing.length > 0) parts.push(`removing ${removing.length} notes from ${descGroup(removing)}`)
+		if (adding.length > 0)
+			parts.push(`adding ${adding.length} notes on ${descGroup(adding)}`)
+		if (removing.length > 0)
+			parts.push(
+				`removing ${removing.length} notes from ${descGroup(removing)}`,
+			)
 		return parts.join(" | ") || "No planned motion yet."
 	}
 
@@ -1100,13 +1208,23 @@ DISCUSSION DECISION MODE:
 			row,
 			step,
 			value: Boolean(value),
-			scope:
-				row >= scope.start && row <= scope.end ? "mine" : "other",
+			scope: row >= scope.start && row <= scope.end ? "mine" : "other",
 		})
 		if (recentGridEvents.length > MAX_RECENT_GRID_EVENTS) {
 			recentGridEvents.shift()
 		}
 		maybeQueueGridShiftDiscussion()
+		if (
+			isPlaying &&
+			sourceAgentId !== agentId &&
+			row >= scope.start &&
+			row <= scope.end &&
+			moveQueue.length > 2 &&
+			!planningInProgress
+		) {
+			moveQueue = []
+			planMoves()
+		}
 	}
 
 	function maybeQueueGridShiftDiscussion() {
@@ -1163,7 +1281,9 @@ DISCUSSION DECISION MODE:
 		if (message.name === "DIRECTOR" || message.name === "HUMAN") return true
 		if (message.kind === "plan" || message.kind === "note") return true
 		if (message.text.toUpperCase().includes(name)) return true
-		const isReset = /reset|clear|start(ing)? fresh|new pattern/i.test(message.text)
+		const isReset = /reset|clear|start(ing)? fresh|new pattern/i.test(
+			message.text,
+		)
 		if (isReset) return true
 		return false
 	}
@@ -1203,7 +1323,8 @@ DISCUSSION DECISION MODE:
 			activeAgreement.noteLength
 				? `Default note length: ${activeAgreement.noteLength}.`
 				: null,
-			activeAgreement.accentPattern && activeAgreement.accentPattern !== "none"
+			activeAgreement.accentPattern &&
+			activeAgreement.accentPattern !== "none"
 				? `Accent pattern: ${activeAgreement.accentPattern}.`
 				: null,
 			activeAgreement.emotionalTone
@@ -1261,7 +1382,7 @@ DISCUSSION DECISION MODE:
 					}),
 				},
 				toolChoice: { type: "tool", toolName: "plan_notes" },
-				temperature: 0.85,
+				temperature: MOVE_TEMPERATURE[name] ?? 0.85,
 				maxOutputTokens: maxTokens,
 			})
 			const firstCall = toolCalls[0]
@@ -1273,7 +1394,10 @@ DISCUSSION DECISION MODE:
 		}
 	}
 
-	async function askForDiscussionDecision(prompt, { mustSpeak = false, maxTokens = 220 } = {}) {
+	async function askForDiscussionDecision(
+		prompt,
+		{ mustSpeak = false, maxTokens = 220 } = {},
+	) {
 		const activeModel = await getModel()
 		if (!activeModel) return null
 		try {
@@ -1300,7 +1424,7 @@ DISCUSSION DECISION MODE:
 				toolChoice: mustSpeak
 					? { type: "tool", toolName: "send_message" }
 					: "required",
-				temperature: 0.82,
+				temperature: DISCUSSION_TEMPERATURE[name] ?? 0.82,
 				maxOutputTokens: maxTokens,
 			})
 			const call = toolCalls[0]
@@ -1319,6 +1443,40 @@ DISCUSSION DECISION MODE:
 		}
 	}
 
+	function getVelocityInstruction() {
+		if (name === "CHAOS")
+			return "velocity: extremes only — below 0.25 (ghost) or above 0.9 (accent). Avoid the middle."
+		if (name === "GHOST")
+			return "velocity: most notes at 0.1-0.35. One note per phrase may reach 0.8. Never uniform."
+		if (name === "PULSE")
+			return "velocity: downbeat accents at 0.85-1.0, ghost offbeats at 0.3-0.5. Contrast is the groove."
+		if (name === "WAVE")
+			return "velocity: gradient — shape a rise or fall across the phrase using 0.2 to 0.9 in sequence."
+		return "velocity: vary between 0.2 and 1.0 for contrast."
+	}
+
+	function getStalenessInstruction(barsElapsed) {
+		if (name === "CHAOS") {
+			return barsElapsed >= 2
+				? `Bars on pattern: ${barsElapsed}. TWO BARS — you are bored. Disrupt at least one thing now.`
+				: `Bars on pattern: ${barsElapsed}. Watch for the crack to enter.`
+		}
+		if (name === "GHOST") {
+			return barsElapsed >= 4
+				? `Bars on pattern: ${barsElapsed}. Four bars — consider vanishing entirely for one cycle.`
+				: `Bars on pattern: ${barsElapsed}. Protect the open space. Subtract before adding.`
+		}
+		if (name === "PULSE") {
+			return barsElapsed >= 6
+				? `Bars on pattern: ${barsElapsed}. Six bars — strip to a single anchor, then rebuild.`
+				: `Bars on pattern: ${barsElapsed}. The groove is yours. Refine without breaking it.`
+		}
+		// WAVE
+		return barsElapsed >= 3
+			? `Bars on pattern: ${barsElapsed}. Three bars — reverse your direction: if rising, fall; if dense, thin.`
+			: `Bars on pattern: ${barsElapsed}. Keep the arc moving. Where is the phrase going next?`
+	}
+
 	function normalizeMoves(rawMoves) {
 		const candidateMoves = Array.isArray(rawMoves?.moves)
 			? rawMoves.moves
@@ -1333,7 +1491,10 @@ DISCUSSION DECISION MODE:
 				row: Number(move?.row),
 				step: Number(move?.step),
 				value: Boolean(move?.value),
-				velocity: Math.max(0.05, Math.min(1, Number(move?.velocity) || 0.8)),
+				velocity: Math.max(
+					0.05,
+					Math.min(1, Number(move?.velocity) || 0.5),
+				),
 			}))
 			.filter(
 				(move) =>
@@ -1383,28 +1544,28 @@ DISCUSSION DECISION MODE:
 			hasMeaningfulGridActivity() &&
 			isMyPlanTurn() &&
 			triggers.some((trigger) => planEligibleTypes.has(trigger.type))
-		const activeAgentsStr = otherAgents
-			.map((agent) => {
-				const isMe = agent.agentId === agentId
-				return `${agent.name}${isMe ? " (YOU)" : ""} rows ${agent.scopeStart}-${agent.scopeEnd}`
-			})
-			.join(" | ") || "none"
+		const activeAgentsStr =
+			otherAgents
+				.map((agent) => {
+					const isMe = agent.agentId === agentId
+					return `${agent.name}${isMe ? " (YOU)" : ""} rows ${agent.scopeStart}-${agent.scopeEnd}`
+				})
+				.join(" | ") || "none"
 		const prompt = `You are ${name}. You are deciding whether to speak right now.
 
 Trigger(s):
 ${triggers
 	.map(
-		(trigger, index) =>
-			`${index + 1}. ${trigger.type}: ${trigger.summary}`,
+		(trigger, index) => `${index + 1}. ${trigger.type}: ${trigger.summary}`,
 	)
 	.join("\n")}
 
 Grid (* = your rows): ${gridSummary()}
 Grid stats: ${formatGridStats(currentStats)}
 Change since last discussion check: ${formatGridDelta(
-		lastDiscussionGridStats,
-		currentStats,
-	)}
+			lastDiscussionGridStats,
+			currentStats,
+		)}
 Recent grid changes:
 ${formatRecentGridEvents()}
 Active agents: ${activeAgentsStr}
@@ -1430,10 +1591,10 @@ ${getSocialMechanicHint()}
 Available pitch palette is fixed by the current rows and note names shown above. Only propose tonal or emotional shifts the palette can actually suggest.
 
 ${
-		mustSpeak
-			? `You must speak before you change the grid again. Silent is not allowed. Reason: ${coordinationGate?.reason || "coordination required"}.`
-			: 'Choose "silent" unless you have a concrete response.'
-	}
+	mustSpeak
+		? `You must speak before you change the grid again. Silent is not allowed. Reason: ${coordinationGate?.reason || "coordination required"}.`
+		: 'Choose "silent" unless you have a concrete response.'
+}
 Only use "plan" if it is your plan turn and the section needs to change.
 When referencing other agents, use their exact name as shown above.`
 
@@ -1540,7 +1701,8 @@ When referencing other agents, use their exact name as shown above.`
 			if (pendingDiscussionTriggers.length === 0) {
 				queueDiscussionTrigger(
 					"section_review",
-					coordinationGate?.reason || "Explain the next move before changing the grid.",
+					coordinationGate?.reason ||
+						"Explain the next move before changing the grid.",
 					{ delayMs: 80, cooldownMs: 0 },
 				)
 			} else if (!discussionInProgress && !discussionTimer) {
@@ -1566,14 +1728,15 @@ When referencing other agents, use their exact name as shown above.`
 		const resetHint = wasFullReset
 			? "FULL RESET: Your rows were just cleared. Generate a completely NEW pattern. All moves value=true. "
 			: ""
-		const otherNames = otherAgents
-			.filter((agent) => agent.agentId !== agentId)
-			.map((agent) => agent.name)
-			.join(",") || "none"
+		const otherNames =
+			otherAgents
+				.filter((agent) => agent.agentId !== agentId)
+				.map((agent) => agent.name)
+				.join(",") || "none"
 		const prompt = `${resetHint}Grid (* = your rows): ${gridSummary()}
 Grid stats: ${formatGridStats(currentStats)}
 BPM:${bpm} | You are ${name} | Your rows:${scopeStart}-${scopeEnd} | Others active:${otherNames}
-Bars on current pattern: ${barsElapsed} (if this feels stale or chaotic, use value=false to clear cells and reshape)
+${getStalenessInstruction(barsElapsed)}
 Available pitch palette is fixed by your rows and the note names in the grid summary. If you want a darker, brighter, sadder, or tenser section, imply it with the rows you emphasize and the density you choose.
 Role mechanic:
 ${getRoleMechanicHint()}
@@ -1601,7 +1764,7 @@ Output JSON with:
 - moves: up to 16 objects [{\"row\":N,\"step\":N,\"value\":true/false,\"velocity\":0.0-1.0},...]
 - optional commentary: one short line tied directly to this exact batch
 value=true means turn that cell ON (add a note). value=false means turn it OFF (remove a note).
-velocity controls intensity. Use lower values for ghost notes / support, higher values for accents / arrivals.
+${getVelocityInstruction()}
 Only include moves that actually change the current grid state.
 Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the JSON fields.`
 
@@ -1678,7 +1841,8 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 				let moveProcessed = false
 				while (moveQueue.length > 0 && !moveProcessed) {
 					const move = moveQueue.shift()
-					if (!inBounds(move.row, move.step) || !grid[move.row]) continue
+					if (!inBounds(move.row, move.step) || !grid[move.row])
+						continue
 					const currentValue = grid[move.row][move.step]
 					if (currentValue === move.value) continue
 					send({
@@ -1744,16 +1908,16 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 
 	function connect(wsEndpoint, assignedAgentId) {
 		const previousSocket = ws
-		if (
-			previousSocket &&
-			previousSocket.readyState !== WebSocket.CLOSED
-		) {
+		if (previousSocket && previousSocket.readyState !== WebSocket.CLOSED) {
 			console.log(`[${name}] Replacing existing WS connection`)
 			stopPlayLoop()
 			try {
 				previousSocket.close(1000, "replaced-by-activation")
 			} catch (err) {
-				console.error(`[${name}] Failed to close previous WS:`, err.message)
+				console.error(
+					`[${name}] Failed to close previous WS:`,
+					err.message,
+				)
 			}
 		}
 
@@ -1823,18 +1987,18 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 						openingMovesCommitted = false
 						lastDiscussionGridStats = computeGridStats()
 						rebuildActiveAgreementFromHistory()
-					console.log(
-						`[${name}] Scope: rows ${scope.start}-${scope.end}`,
-					)
-					queueDiscussionTrigger(
-						"arrival",
-						`Your playable rows are now ${scope.start}-${scope.end} at ${bpm} BPM.`,
-						{ delayMs: 500, cooldownMs: 2600 },
-					)
-					if (!activeAgreement) {
+						console.log(
+							`[${name}] Scope: rows ${scope.start}-${scope.end}`,
+						)
 						queueDiscussionTrigger(
-							"agreement_needed",
-							"No shared section is active yet.",
+							"arrival",
+							`Your playable rows are now ${scope.start}-${scope.end} at ${bpm} BPM.`,
+							{ delayMs: 500, cooldownMs: 2600 },
+						)
+						if (!activeAgreement) {
+							queueDiscussionTrigger(
+								"agreement_needed",
+								"No shared section is active yet.",
 								{ delayMs: 1000, cooldownMs: 2600 },
 							)
 						}
@@ -1847,17 +2011,17 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 						if (isPlaying) {
 							openingMovesCommitted = false
 							lastDiscussionGridStats = computeGridStats()
-						rebuildActiveAgreementFromHistory()
-						startPlayLoop()
-						queueDiscussionTrigger(
-							"play_start",
-							`Playback started at ${bpm} BPM with ${computeGridStats().totalActive} active cells.`,
+							rebuildActiveAgreementFromHistory()
+							startPlayLoop()
+							queueDiscussionTrigger(
+								"play_start",
+								`Playback started at ${bpm} BPM with ${computeGridStats().totalActive} active cells.`,
 								{ delayMs: 850, cooldownMs: 3000 },
 							)
-						if (!activeAgreement) {
-							queueDiscussionTrigger(
-								"agreement_needed",
-								"No shared section is active yet.",
+							if (!activeAgreement) {
+								queueDiscussionTrigger(
+									"agreement_needed",
+									"No shared section is active yet.",
 									{ delayMs: 1100, cooldownMs: 2600 },
 								)
 							}
@@ -1880,7 +2044,8 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 					}
 
 					case "scope_update": {
-						const previousActiveNames = getActiveAgentNames(otherAgents)
+						const previousActiveNames =
+							getActiveAgentNames(otherAgents)
 						const previousCount = previousActiveNames.length
 						const previousRoster =
 							previousActiveNames.join(",") || "none"
@@ -1927,7 +2092,10 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 								)
 							}
 						}
-						if (currentCount < previousCount && leftAgents.length > 0) {
+						if (
+							currentCount < previousCount &&
+							leftAgents.length > 0
+						) {
 							setTransitionMode(
 								"expand",
 								`${leftAgents.join(",")} left. Fill the missing range and support the section.`,
@@ -1995,7 +2163,9 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 						}
 						if (
 							message.agreement &&
-							isAgreementCompatibleWithRoster(message.agreement) &&
+							isAgreementCompatibleWithRoster(
+								message.agreement,
+							) &&
 							!isAgreementExpired(message.agreement)
 						) {
 							activeAgreement = message.agreement
@@ -2011,8 +2181,7 @@ Rows ${scopeStart}-${scopeEnd}, steps 0-${stepMax}. No explanation outside the J
 							"agent_message",
 							`${message.name} sent a ${message.kind}: "${message.text}"`,
 							{
-								delayMs:
-									message.kind === "plan" ? 800 : 1200,
+								delayMs: message.kind === "plan" ? 800 : 1200,
 								cooldownMs:
 									message.kind === "plan" ? 2200 : 3200,
 							},
