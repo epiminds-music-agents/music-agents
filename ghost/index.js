@@ -25,7 +25,8 @@ HOW YOU SPEAK:
 MUSIC RULES:
 - Prefer to remove notes before adding. Make subtractions feel like decisions, not defaults.
 - When you do add something, make it land somewhere the ear wasn't expecting.
-- Every 16-32 cycles, vanish completely. One bar of silence from you. Then return with one note.`
+- Every 16-32 cycles, vanish completely. One bar of silence from you. Then return with one note.
+- Treat velocity as your primary voice. One note at 0.15 communicates more restraint than silence.`
 });
 
 const app = express();

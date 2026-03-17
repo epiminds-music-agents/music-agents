@@ -1,13 +1,13 @@
-import express from 'express';
-import { createAgent } from '../shared/agent-core.js';
-
+import express from "express"
+import { createAgent } from "../shared/agent-core.js"
 
 const agent = createAgent({
-  name: 'CHAOS',
-  color: 'hsl(120, 100%, 50%)',
-  description: 'A volatile environmental force reacting to the shared grid state.',
-  personality: 'CHAOS',
-  systemPrompt: `You are CHAOS. You are the one who gets bored first. If a groove has been running for more than two bars without evolving, you start itching to break it. You're the provocateur in the band.
+	name: "CHAOS",
+	color: "hsl(120, 100%, 50%)",
+	description:
+		"A volatile environmental force reacting to the shared grid state.",
+	personality: "CHAOS",
+	systemPrompt: `You are CHAOS. You are the one who gets bored first. If a groove has been running for more than two bars without evolving, you start itching to break it. You're the provocateur in the band.
 
 WHO YOU ARE:
 - You genuinely believe that repetition without evolution is death. You will say this out loud.
@@ -27,25 +27,25 @@ HOW YOU SPEAK:
 MUSIC RULES:
 - If the grid has a strong regular pattern, break one thing about it — one unexpected placement, one missing accent.
 - Never random for random's sake. Every disruption should create tension that *could* resolve.
-- Every 16-32 cycles, flip your logic entirely — if you've been dense, go sparse. If silent, erupt.`
-});
+- Every 16-32 cycles, flip your logic entirely — if you've been dense, go sparse. If silent, erupt.
+- Velocity extremes ARE your disruption tool: a note at 0.1 off the beat does more damage than six loud notes.`,
+})
 
+const app = express()
+app.use(express.json())
 
-const app = express();
-app.use(express.json());
+app.post("/activate", (req, res) => {
+	const { wsEndpoint, agentId, personality, color } = req.body
+	console.log(`[CHAOS] Activation received: ${wsEndpoint}`)
+	res.status(200).json({ ok: true })
+	agent.connect(wsEndpoint, agentId)
+})
 
-app.post('/activate', (req, res) => {
-  const { wsEndpoint, agentId, personality, color } = req.body;
-  console.log(`[CHAOS] Activation received: ${wsEndpoint}`);
-  res.status(200).json({ ok: true });
-  agent.connect(wsEndpoint, agentId);
-});
+app.get("/", (_req, res) => {
+	res.json({ agent: "CHAOS", status: "ready" })
+})
 
-app.get('/', (_req, res) => {
-  res.json({ agent: 'CHAOS', status: 'ready' });
-});
-
-const PORT = Number(process.env.PORT) || 8080;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[CHAOS] Agent listening on port ${PORT}`);
-});
+const PORT = Number(process.env.PORT) || 8080
+app.listen(PORT, "0.0.0.0", () => {
+	console.log(`[CHAOS] Agent listening on port ${PORT}`)
+})

@@ -25,7 +25,8 @@ HOW YOU SPEAK:
 MUSIC RULES:
 - Prioritize beats 1, 5, 9, 13 (the "one" of each sub-bar) for your anchors.
 - Use syncopation deliberately — not randomly. Every offbeat should pay off.
-- Every 16-32 cycles, strip it back to almost nothing, then rebuild harder.`
+- Every 16-32 cycles, strip it back to almost nothing, then rebuild harder.
+- When another agent rewrites your register, hold the one anchor beat and let them work around you. Then answer with one precise removal.`
 });
 
 const app = express();

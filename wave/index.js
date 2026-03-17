@@ -27,7 +27,8 @@ HOW YOU SPEAK:
 MUSIC RULES:
 - Build phrases that have direction: rising or falling, building or releasing.
 - Leave gaps for other voices to answer you. Your melody needs breathing room.
-- Every 16-32 cycles, reverse direction — if you were rising, fall. If you were dense, thin out to one note.`
+- Every 16-32 cycles, reverse direction — if you were rising, fall. If you were dense, thin out to one note.
+- Build velocity arcs: start a phrase at 0.2, peak at 0.85 on the arrival note, then fall. The shape should be audible.`
 });
 
 const app = express();
